@@ -73,6 +73,49 @@ describe('routing', () => {
   });
 });
 
+describe('snooze', () => {
+  test('a snoozed ask comes back and pings you when the snooze ends, without spending budget', () => {
+    const { r, pings } = makeRouter({ budget: { initial: 1, min: 1, max: 30 } });
+    r.submit(decision({ question: 'first?' }));
+    advance(1100, r);
+    const a = r.submit(decision());
+    assert.equal(a.delivery.mode, 'held', 'over budget');
+    r.snooze(a.id, 10 * 60000);
+    assert.equal(a.delivery.mode, 'snoozed');
+    advance(9 * 60000, r);
+    assert.equal(pings.length, 1);
+    advance(2 * 60000, r);
+    advance(1100, r);
+    assert.equal(pings.length, 2, 'reminder delivered even though the agent has no budget');
+    assert.equal(a.delivery.mode, 'interrupted');
+    assert.match(a.delivery.reason, /snooze ended/);
+  });
+
+  test('a snooze that ends during focus waits for the natural break', () => {
+    const { r, pings } = makeRouter();
+    const a = r.submit(decision());
+    advance(1100, r);
+    r.snooze(a.id, 60000);
+    r.setState('focus');
+    advance(61000, r);
+    assert.equal(a.delivery.mode, 'held');
+    r.setState('available');
+    assert.equal(pings.at(-1).asks[0].id, a.id);
+  });
+
+  test('unsnooze puts it back where it was, without pinging again', () => {
+    const { r, pings } = makeRouter();
+    const a = r.submit(decision());
+    advance(1100, r);
+    assert.equal(a.delivery.mode, 'interrupted');
+    r.snooze(a.id, 3600000);
+    r.unsnooze(a.id);
+    assert.equal(a.delivery.mode, 'interrupted');
+    advance(2000, r);
+    assert.equal(pings.length, 1);
+  });
+});
+
 describe('deadlines', () => {
   test('the default applies when nobody answers', () => {
     const { r } = makeRouter();

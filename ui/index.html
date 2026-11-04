@@ -5,55 +5,61 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="doorman-token" content="__DOORMAN_TOKEN__">
   <meta name="doorman-version" content="__DOORMAN_VERSION__">
+  <meta name="color-scheme" content="light dark">
   <title>Doorman</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="chrome">
-  <header class="top">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 21V4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 21h18" stroke="currentColor" stroke-width="1.8"/><circle cx="14.5" cy="12.5" r="1.2" fill="currentColor"/></svg>
-      <span>doorman</span>
-    </div>
-    <div class="state" id="state">
-      <div class="seg" role="radiogroup" aria-label="Your state">
-        <button data-mode="available" role="radio">Available</button>
-        <button data-mode="focus" role="radio">Focus</button>
-        <button data-mode="dnd" role="radio">DND</button>
-        <button data-mode="away" role="radio">Away</button>
-        <button data-mode="auto" role="radio" title="Follow calendar and quiet hours">Auto</button>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="#inbox" aria-label="Doorman inbox">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 21V4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 21h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="14.5" cy="12.5" r="1.2" fill="currentColor"/></svg>
+        <span>Doorman</span>
+      </a>
+      <div class="status-wrap">
+        <button class="status" id="status-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="status-menu">
+          <span class="dot" id="status-dot"></span>
+          <span class="status-text"><strong id="status-mode">Available</strong><span id="status-sub"></span></span>
+          <svg class="chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="popover status-menu" id="status-menu" role="menu" hidden></div>
       </div>
-      <select id="state-for" aria-label="For how long">
-        <option value="">until I change it</option>
-        <option value="30m">for 30 min</option>
-        <option value="1h">for 1 hour</option>
-        <option value="2h">for 2 hours</option>
-        <option value="4h">for 4 hours</option>
-      </select>
-      <div class="state-label" id="state-label"></div>
-    </div>
-    <div class="conn" id="conn" title="Live connection"></div>
-  </header>
+      <button class="icon-btn" id="help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
 
-  <nav class="tabs" id="tabs">
-    <button data-tab="inbox" class="on">Needs you <b id="c-inbox"></b></button>
-    <button data-tab="fyi">FYI <b id="c-fyi"></b></button>
-    <button data-tab="history">History</button>
-    <button data-tab="agents">Agents</button>
-    <button data-tab="rules">Rules <b id="c-rules"></b></button>
-    <button data-tab="ledger">Ledger</button>
-    <button data-tab="settings">Settings</button>
-  </nav>
+    <div class="offline" id="offline" hidden role="status">
+      <span class="spinner" aria-hidden="true"></span> Lost connection to the Doorman daemon. Reconnecting…
+    </div>
+
+    <div class="layout">
+      <nav class="sidebar" id="nav" aria-label="Sections"></nav>
+      <main id="main" tabindex="-1"></main>
+    </div>
   </div>
 
-  <main id="main" tabindex="-1"></main>
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
-  <footer class="foot">
-    <span id="stats"></span>
-    <span class="keys"><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>1</kbd>–<kbd>9</kbd> choose · <kbd>e</kbd> expand · <kbd>a</kbd> always · <kbd>s</kbd> snooze · <kbd>d</kbd> dismiss</span>
-  </footer>
-  <div id="toast" class="toast" hidden></div>
+  <dialog id="help" aria-labelledby="help-title">
+    <div class="dialog-head"><h2 id="help-title">Keyboard shortcuts</h2><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <dl class="keys">
+      <div><dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous</dd></div>
+      <div><dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Choose an option</dd></div>
+      <div><dt><kbd>Enter</kbd></dt><dd>Mark an update read</dd></div>
+      <div><dt><kbd>s</kbd></dt><dd>Snooze</dd></div>
+      <div><dt><kbd>d</kbd></dt><dd>Dismiss</dd></div>
+      <div><dt><kbd>e</kbd></dt><dd>Show more context</dd></div>
+      <div><dt><kbd>a</kbd></dt><dd>Toggle “Always do this”</dd></div>
+      <div><dt><kbd>z</kbd></dt><dd>Undo</dd></div>
+      <div><dt><kbd>g</kbd> then <kbd>i</kbd> <kbd>u</kbd> <kbd>s</kbd> <kbd>h</kbd></dt><dd>Go to Inbox, Updates, Snoozed, History</dd></div>
+      <div><dt><kbd>f</kbd></dt><dd>Change your status</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>This list</dd></div>
+    </dl>
+  </dialog>
+
   <script src="/app.js" type="module"></script>
 </body>
 </html>

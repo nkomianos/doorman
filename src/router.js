@@ -136,6 +136,12 @@ export class Router extends EventEmitter {
     if (forced === 'hold' || forced === 'mute') return { mode: 'held', reason: 'your rule says never interrupt for this', notes };
     if (rec.muted) return { mode: 'held', reason: `you muted ${rec.name}`, notes };
 
+    if (ask.woke) {
+      // A reminder you set yourself doesn't spend the agent's budget, but it still respects focus.
+      ask.woke = false;
+      if (Math.max(rank, 1) >= threshold) return { mode: 'interrupt', bypass: true, reason: 'your snooze ended', notes };
+      return { mode: 'held', reason: `your snooze ended while you're ${MODES[st.mode].label.toLowerCase()}; waiting for a natural break`, notes };
+    }
     if (rank >= threshold) {
       if (rank === 3) return { mode: 'interrupt', bypass: true, reason: 'critical', notes };
       const where = { available: 'available', focus: 'focused', dnd: 'in do-not-disturb', away: 'away' }[st.mode];
@@ -237,6 +243,8 @@ export class Router extends EventEmitter {
         continue;
       }
       if (ask.delivery?.mode === 'snoozed' && ask.delivery.until <= now) {
+        // You asked to be reminded: try to interrupt now (see _decide), else wait for a break.
+        ask.woke = true;
         ask.delivery = { mode: 'held', reason: 'snooze ended', at: now };
       }
       // Held asks may now interrupt (natural break, budget refill, deadline pressure).
@@ -331,8 +339,21 @@ export class Router extends EventEmitter {
     const now = this.clock();
     if (this.bundle) this.bundle.ids = this.bundle.ids.filter((x) => x !== id);
     const until = now + ms;
-    ask.delivery = { mode: 'snoozed', until, reason: `snoozed for ${fmtDuration(ms)}`, at: now };
+    const prev = ask.delivery?.mode === 'snoozed' ? ask.delivery.prev : ask.delivery;
+    ask.delivery = { mode: 'snoozed', until, reason: `snoozed for ${fmtDuration(ms)}`, at: now, prev };
     this.ledger.append('ask.snoozed', { id, until, surface });
+    this.emit('update', ask);
+    return ask;
+  }
+
+  /** Undo a snooze: the ask goes back to where it was, without pinging you again. */
+  unsnooze(id, { surface = 'api' } = {}) {
+    const ask = this._open(id);
+    if (ask.delivery?.mode !== 'snoozed') return ask;
+    const prev = ask.delivery.prev;
+    const now = this.clock();
+    ask.delivery = prev && prev.mode !== 'queued' ? prev : { mode: 'held', reason: 'back from snooze', at: now };
+    this.ledger.append('ask.unsnoozed', { id, surface });
     this.emit('update', ask);
     return ask;
   }

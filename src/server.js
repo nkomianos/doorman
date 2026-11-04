@@ -52,7 +52,7 @@ function tokenOk(req, url, token) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown }) {
+export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown, startDemo }) {
   const clients = new Set();
   const broadcast = (event, data) => {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -108,6 +108,7 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
       if (!ms) throw httpError(400, 'for must be a duration like "30m"');
       return answerView(router.snooze(id, ms, { surface: b.surface || 'api' }));
     }],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/unsnooze$/, async (q, id) => answerView(router.unsnooze(id, { surface: (await q.body()).surface || 'api' }))],
     ['DELETE', /^\/v1\/asks\/([\w-]+)$/, (q, id) => answerView(router.cancel(id, q.url.searchParams.get('reason')))],
     ['POST', /^\/v1\/digest$/, () => ({ delivered: !!router.deliverDigest() })],
     ['GET', /^\/v1\/agents$/, () => ({ agents: router.budgets.list() })],
@@ -132,6 +133,10 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
     ['GET', /^\/v1\/config$/, () => getConfig()],
     ['PATCH', /^\/v1\/config$/, async (q) => updateConfig(await q.body())],
     ['POST', /^\/v1\/notify-test$/, async () => notifyTest()],
+    ['POST', /^\/v1\/demo$/, () => {
+      if (!startDemo) throw httpError(501, 'demo not available');
+      return [202, startDemo()];
+    }],
     ['POST', /^\/v1\/shutdown$/, () => {
       setTimeout(onShutdown, 50);
       return { ok: true };

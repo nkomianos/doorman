@@ -1,14 +1,22 @@
 // Wires the router, persistence, surfaces and the HTTP server into one process.
 import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Budgets } from './budget.js';
 import { EDITABLE_KEYS, VERSION, ensureHome, getToken, loadConfig, readJSON, saveUserConfig, writeJSON } from './config.js';
 import { Ledger } from './ledger.js';
 import { Ntfy, compose, desktopNotify } from './notify.js';
 import { Router } from './router.js';
 import { Rules } from './rules.js';
+import { DoormanClient } from './client.js';
+import { SCRIPT, runDemo } from './demo.js';
 import { createServer } from './server.js';
 import { HumanState } from './state.js';
 import { randomToken } from './util.js';
+
+// The exact command to run this copy of doorman, for copy-paste setup instructions in the inbox.
+const BIN = fileURLToPath(new URL('../bin/doorman.js', import.meta.url));
+const CLI = `node "${BIN}"`;
 
 export async function startDaemon({ home, port, overrides = {}, log = (m) => console.error(`[doorman] ${m}`), tickMs = 250, quiet = false } = {}) {
   const p = ensureHome(home);
@@ -64,11 +72,14 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   startNtfy();
 
   const baseUrl = () => `http://127.0.0.1:${config.port}`;
+  const iconPath = join(p.home, 'doorman.png');
   router.on('interrupt', (n) => {
     const c = compose(n, baseUrl());
     n.composed = { title: c.title, body: c.body };
     if (!quiet) log(`interrupt → ${c.title}: ${c.body.replace(/\n/g, ' | ')}`);
-    if (config.desktop && n.surfaces.includes('desktop')) desktopNotify(c);
+    if (config.desktop && n.surfaces.includes('desktop')) {
+      desktopNotify(c, { icon: iconPath }).then((r) => { if (!r.ok) log(`desktop notification failed: ${r.error}`); });
+    }
     if (ntfy && (ntfy.shouldSend(n.state) || !n.surfaces.includes('desktop'))) {
       ntfy.publish(n, c).catch((err) => log(err.message));
     }
@@ -78,7 +89,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     const out = {};
     for (const k of EDITABLE_KEYS) out[k] = config[k] ?? null;
     if (out.ntfy) out.ntfy = { ...out.ntfy, token: out.ntfy.token ? '••••' : null, replyTopic: out.ntfy.replyTopic || `${out.ntfy.topic}-reply` };
-    return { config: out, home: p.home, port: config.port, version: VERSION };
+    return { config: out, home: p.home, port: config.port, version: VERSION, cli: CLI };
   };
   const updateConfig = async (patch) => {
     if (patch.ntfy?.token === '••••') patch.ntfy.token = config.ntfy?.token ?? null;
@@ -94,12 +105,18 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   const notifyTest = async () => {
     const c = { title: 'Doorman test', body: 'If you can see this, interruptions reach you here.', url: `${baseUrl()}/`, single: null, urgency: 'normal' };
     const sent = [];
-    if (config.desktop) { desktopNotify(c); sent.push('desktop'); }
-    if (ntfy) {
-      await ntfy.publish({ asks: [], digest: [] }, c);
-      sent.push('phone');
+    const errors = {};
+    if (config.desktop) {
+      const r = await desktopNotify(c, { icon: iconPath });
+      if (r.ok) sent.push('desktop'); else errors.desktop = r.error;
     }
-    return { sent };
+    if (ntfy) {
+      try {
+        await ntfy.publish({ asks: [], digest: [] }, c);
+        sent.push('phone');
+      } catch (err) { errors.phone = err.message; }
+    }
+    return { sent, errors, platform: process.platform };
   };
 
   let closing = null;
@@ -119,7 +136,19 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     return closing;
   };
 
-  const server = createServer({ router, token, version: VERSION, getConfig, updateConfig, notifyTest, onShutdown: () => close().then(() => process.exitCode ?? 0) });
+  // "Try it with sample agents" in the inbox runs the same script as `doorman demo`.
+  let demoRunning = false;
+  const startDemo = () => {
+    if (demoRunning) return { started: false, reason: 'already running' };
+    demoRunning = true;
+    const client = new DoormanClient({ url: baseUrl(), token, autostart: false });
+    runDemo({ client, log: () => {} })
+      .catch((err) => log(`demo failed: ${err.message}`))
+      .finally(() => { demoRunning = false; });
+    return { started: true, asks: SCRIPT.length };
+  };
+
+  const server = createServer({ router, token, version: VERSION, getConfig, updateConfig, notifyTest, startDemo, onShutdown: () => close().then(() => process.exitCode ?? 0) });
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);

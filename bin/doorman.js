@@ -69,8 +69,8 @@ function openBrowser(url) {
 }
 
 async function cmdStart(args) {
-  const client = new DoormanClient({ autostart: false });
   const port = args.flags.port ? Number(args.flags.port) : undefined;
+  const client = new DoormanClient({ autostart: false, url: port ? `http://127.0.0.1:${port}` : undefined });
   if (await client.health()) {
     if (!args.flags['background-child']) console.log(`doorman is already running at ${client.url}`);
     return;

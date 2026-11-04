@@ -103,9 +103,17 @@ Settings → Phone. Doorman pushes through [ntfy](https://ntfy.sh) (hosted or se
 
 ## The inbox
 
-`http://127.0.0.1:7777`. Needs you · FYI · History · Agents (budgets, credibility, mute) · Rules (suggestions, globs) · Ledger (verify) · Settings (quiet hours, calendar, digest times, phone).
+`http://127.0.0.1:7777`. A fresh install opens on a welcome screen with a **Run the demo** button.
 
-Keyboard: `j`/`k` move · `1`–`9` choose · `e` expand · `a` always · `s` snooze · `d` dismiss.
+- **Needs you**: decisions, split into "Pinged you" and "Didn't ping you", each with a deadline countdown and a plain-language line saying why it was or wasn't routed to you.
+- **Answer, dismiss or mark read** and the card leaves at once, with **Undo** for 5 seconds before anything is sent to the agent.
+- **Snooze** (5 min to tomorrow morning; times past the deadline are blocked) moves a request to **Snoozed**. When the snooze ends, it comes back and pings you, without using the agent's budget.
+- **Status menu** (top right): Available, Focus, Do not disturb, Away or Automatic, each for 30 min to 4 hours or until you change it.
+- **Updates**, **History** (filters and search), **Agents** (ping budget, credibility, mute), **Rules** (suggestions, plain-English rules, undo delete), **Activity log** (verify the chain), **Settings** (desktop and phone notifications with a test button and troubleshooting, schedule, delivery, copy-paste agent setup).
+
+Keyboard: `j`/`k` move · `1`–`9` choose · `s` snooze · `d` dismiss · `e` more context · `a` always · `z` undo · `f` status · `g` then `i`/`u`/`s`/`h` to switch views · `?` all shortcuts.
+
+On Windows, Doorman registers itself as a notification sender (per-user, no admin), so it shows up as **Doorman** under Settings → System → Notifications. If you don't see pop-ups, check that Windows' Do not disturb is off.
 
 ## The Ask format
 

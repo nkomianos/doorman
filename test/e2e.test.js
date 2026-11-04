@@ -70,6 +70,25 @@ describe('HTTP API', () => {
     assert.equal(v.answer.by, 'human');
   });
 
+  test('snooze and unsnooze from the inbox', async () => {
+    const r = await c.submit({ agent: { id: 'snoozer', name: 'Snoozer' }, question: 'Renew the domain?', options: ['Renew', 'Let it lapse'] });
+    const s = await c.request('POST', `/v1/asks/${r.id}/snooze`, { for: '1h', surface: 'web' });
+    assert.equal(s.delivery.mode, 'snoozed');
+    const u = await c.request('POST', `/v1/asks/${r.id}/unsnooze`, { surface: 'web' });
+    assert.notEqual(u.delivery.mode, 'snoozed');
+    await c.request('POST', `/v1/asks/${r.id}/dismiss`, {});
+  });
+
+  test('the inbox can start the sample-agent demo', async () => {
+    const r = await c.request('POST', '/v1/demo');
+    assert.equal(r.started, true);
+    assert.equal((await c.request('POST', '/v1/demo')).started, false, 'only one demo at a time');
+    await nextOpenAsk((x) => x.question.startsWith('Refactor done'));
+    await sleep(1200); // the demo waits out the bundle window before it finishes
+    const { asks } = await c.request('GET', '/v1/asks?status=open');
+    for (const a of asks.filter((x) => x.agent.id.startsWith('demo-'))) await c.request('DELETE', `/v1/asks/${a.id}`);
+  });
+
   test('bad asks get every validation error back', async () => {
     await assert.rejects(c.submit({ options: ['x'] }), (err) => err.status === 400 && err.body.errors.length >= 2);
   });

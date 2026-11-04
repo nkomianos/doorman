@@ -32,30 +32,70 @@ export function compose(n, baseUrl, now = Date.now()) {
 
 const xml = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 
-/** Best-effort native notification. Never throws. */
-export function desktopNotify({ title, body, url }) {
-  try {
-    let child;
-    if (process.platform === 'win32') {
-      const toast = `<toast activationType="protocol" launch="${xml(url)}"><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body)}</text></binding></visual></toast>`;
-      const ps = [
-        '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
-        '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-        '$x = New-Object Windows.Data.Xml.Dom.XmlDocument',
-        `$x.LoadXml('${toast.replace(/'/g, "''")}')`,
-        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
-      ].join('\n');
-      const encoded = Buffer.from(ps, 'utf16le').toString('base64');
-      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded], { stdio: 'ignore', windowsHide: true });
-    } else if (process.platform === 'darwin') {
-      const q = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      child = spawn('osascript', ['-e', `display notification "${q(body)}" with title "Doorman" subtitle "${q(title)}"`], { stdio: 'ignore' });
-    } else {
-      child = spawn('notify-send', ['--app-name=Doorman', title, body], { stdio: 'ignore' });
+// Windows only shows toasts from a registered app id. Registering "Doorman" under HKCU
+// (no admin, no installer) makes it appear as its own app in Settings > Notifications,
+// instead of borrowing PowerShell's id, whose banners Windows often hides.
+const WIN_APP_ID = 'Doorman';
+const psq = (s) => String(s).replace(/'/g, "''");
+function windowsToastScript({ title, body, url, urgency }, icon) {
+  const scenario = urgency === 'critical' ? ' scenario="urgent"' : '';
+  const toast = `<toast activationType="protocol" launch="${xml(url)}"${scenario}><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body)}</text></binding></visual><actions><action content="Open inbox" activationType="protocol" arguments="${xml(url)}"/></actions></toast>`;
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$key = 'HKCU:\\Software\\Classes\\AppUserModelId\\${WIN_APP_ID}'`,
+    'if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }',
+    "Set-ItemProperty -Path $key -Name DisplayName -Value 'Doorman'",
+    icon ? `$icon = '${psq(icon)}'` : '$icon = $null',
+    'if ($icon -and -not (Test-Path $icon)) {',
+    '  try {',
+    '    Add-Type -AssemblyName System.Drawing',
+    '    $b = New-Object System.Drawing.Bitmap 128, 128',
+    '    $g = [System.Drawing.Graphics]::FromImage($b)',
+    "    $g.SmoothingMode = 'AntiAlias'",
+    '    $g.Clear([System.Drawing.Color]::FromArgb(255, 31, 95, 87))',
+    '    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 9',
+    '    $g.DrawRectangle($pen, 40, 24, 48, 80)',
+    '    $g.DrawLine($pen, 22, 104, 106, 104)',
+    '    $g.FillEllipse([System.Drawing.Brushes]::White, 70, 60, 11, 11)',
+    '    $b.Save($icon, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '  } catch { $icon = $null }',
+    '}',
+    "if ($icon -and (Test-Path $icon)) { Set-ItemProperty -Path $key -Name IconUri -Value $icon; Set-ItemProperty -Path $key -Name IconBackgroundColor -Value 'FF1F5F57' }",
+    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
+    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
+    '$x = New-Object Windows.Data.Xml.Dom.XmlDocument',
+    `$x.LoadXml('${psq(toast)}')`,
+    `$n = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('${WIN_APP_ID}')`,
+    '$n.Show([Windows.UI.Notifications.ToastNotification]::new($x))',
+  ].join('\n');
+}
+
+/** Best-effort native notification. Never throws; resolves to {ok, error}. */
+export function desktopNotify({ title, body, url, urgency }, { icon = null } = {}) {
+  return new Promise((resolve) => {
+    try {
+      let child;
+      if (process.platform === 'win32') {
+        const encoded = Buffer.from(windowsToastScript({ title, body, url, urgency }, icon), 'utf16le').toString('base64');
+        child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      } else if (process.platform === 'darwin') {
+        const q = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        child = spawn('osascript', ['-e', `display notification "${q(body)}" with title "Doorman" subtitle "${q(title)}"`], { stdio: ['ignore', 'ignore', 'pipe'] });
+      } else {
+        child = spawn('notify-send', ['--app-name=Doorman', title, body], { stdio: ['ignore', 'ignore', 'pipe'] });
+      }
+      let err = '';
+      child.stderr.on('data', (d) => { err += d; });
+      child.on('error', (e) => resolve({ ok: false, error: e.message }));
+      child.on('exit', (code) => {
+        // PowerShell writes progress records as CLIXML on stderr; only keep real messages.
+        const msg = err.replace(/#< CLIXML[\s\S]*?<\/Objs>/g, '').trim();
+        resolve(code === 0 ? { ok: true } : { ok: false, error: msg || `exited with code ${code}` });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
     }
-    child.on('error', () => {});
-    child.unref();
-  } catch { /* notifications are best-effort */ }
+  });
 }
 
 const NTFY_PRIORITY = { low: 2, normal: 3, high: 4, critical: 5 };
