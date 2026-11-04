@@ -53,6 +53,8 @@ export class Router extends EventEmitter {
     this.bundle = null;
     this.waiters = new Map();
     this.streaks = new Map();
+    this.answerLog = []; // recent decisions, for learning patterns across similar requests
+    this.fyiLog = new Map(); // agent id -> recent update outcomes (read / dismissed)
     this.suggestions = new Map();
     this.declined = new Set();
     // notifications = times you were actually pinged (a bundle and a digest delivered together count once).
@@ -319,6 +321,7 @@ export class Router extends EventEmitter {
     const interrupted = ask.delivery?.mode === 'interrupted';
     this._finalize(ask, 'read', { by: 'human', surface });
     this.budgets.onOutcome(ask.agent, 'answered', { interrupted, urgency: ask.urgency });
+    if (ask.kind === 'inform') this._learnFyi(ask, 'read');
     return ask;
   }
 
@@ -331,6 +334,7 @@ export class Router extends EventEmitter {
     this._finalize(ask, 'dismissed', answer);
     this.stats.dismissed++;
     this.budgets.onOutcome(ask.agent, 'dismissed', { interrupted, urgency: ask.urgency });
+    if (ask.kind === 'inform') this._learnFyi(ask, 'dismissed');
     return ask;
   }
 
@@ -415,17 +419,101 @@ export class Router extends EventEmitter {
   }
 
   _learn(ask, opt) {
+    this.answerLog.push({ agent: ask.agent.id, fp: ask.fingerprint, option: opt.id, irreversible: ask.reversible === false, at: this.clock() });
+    if (this.answerLog.length > 300) this.answerLog.splice(0, this.answerLog.length - 300);
     if (ask.reversible === false) return; // never suggest automating irreversible decisions
+    if (!this._learnExact(ask, opt)) this._learnPattern(ask, opt);
+  }
+
+  _suggest(sug) {
+    this.suggestions.set(sug.id, sug);
+    this.ledger.append('suggestion.created', { id: sug.id, kind: sug.kind, agent: sug.agent.id, fingerprint: sug.fingerprint ?? null, option: sug.option ?? null, count: sug.count });
+    this.emit('rules');
+    return true;
+  }
+
+  /**
+   * Generalise across similar requests: if you gave the same answer to 3+ different
+   * requests that share a prefix (Bash:git status, Bash:git diff, Bash:git log), offer
+   * one rule for the prefix. Only for tool-style fingerprints the agent set itself,
+   * and never if you ever answered differently, or the action was irreversible.
+   */
+  _learnPattern(ask, opt) {
+    const fp = ask.fingerprint;
+    if (!fp || fp.startsWith(`${ask.agent.id}:`)) return false;
+    const head = fp.indexOf(':') + 1;
+    if (head <= 1) return false;
+    const mine = this.answerLog.filter((h) => h.agent === ask.agent.id && h.fp);
+    for (let i = fp.length - 2; i >= head + 1; i--) {
+      if (!' /\\:.'.includes(fp[i])) continue;
+      const prefix = fp.slice(0, i + 1);
+      const hits = mine.filter((h) => h.fp.startsWith(prefix));
+      const distinct = [...new Set(hits.map((h) => h.fp))];
+      if (distinct.length < this.config.learnThreshold) continue;
+      if (hits.some((h) => h.option !== opt.id || h.irreversible)) return false;
+      const glob = `${escapeGlob(prefix)}*`;
+      const key = `${ask.agent.id}\u0000${glob}`;
+      if (this.declined.has(`${key}\u0000${opt.id}`)) return false;
+      if ([...this.suggestions.values()].some((x) => x.key === key)) return false;
+      if (this.rules.list.some((r) => r.action.answer != null && r.match.fingerprint === glob)) return false;
+      return this._suggest({
+        id: newId('sug'),
+        kind: 'answer',
+        key,
+        agent: { id: ask.agent.id, name: ask.agent.name },
+        fingerprint: glob,
+        glob: true,
+        examples: distinct.slice(-4),
+        option: opt.id,
+        label: opt.label,
+        count: distinct.length,
+        question: ask.question,
+        why: `You answered “${opt.label}” to ${distinct.length} different requests starting with “${prefix.trim()}”, and never anything else`,
+        created_at: this.clock(),
+      });
+    }
+    return false;
+  }
+
+  /** Updates you keep marking "not useful" are better off in the digest. */
+  _learnFyi(ask, outcome) {
+    const list = this.fyiLog.get(ask.agent.id) || [];
+    list.push(outcome);
+    if (list.length > 10) list.shift();
+    this.fyiLog.set(ask.agent.id, list);
+    const dismissed = list.filter((x) => x === 'dismissed').length;
+    if (dismissed < 3 || dismissed < 2 * (list.length - dismissed)) return;
+    const key = `${ask.agent.id}\u0000route:inform`;
+    if (this.declined.has(`${key}\u0000digest`) || [...this.suggestions.values()].some((x) => x.key === key)) return;
+    if (this.rules.list.some((r) => r.action.route && r.match.kind === 'inform' && r.match.agent === escapeGlob(ask.agent.id))) return;
+    this._suggest({
+      id: newId('sug'),
+      kind: 'route',
+      key,
+      agent: { id: ask.agent.id, name: ask.agent.name },
+      match: { agent: escapeGlob(ask.agent.id), kind: 'inform' },
+      action: { route: 'digest' },
+      option: 'digest',
+      label: 'Send to digest',
+      count: dismissed,
+      sentence: `Stop pinging you for ${ask.agent.name}’s updates and save them for your digest?`,
+      why: `You marked ${dismissed} of its last ${list.length} updates as not useful`,
+      created_at: this.clock(),
+    });
+  }
+
+  _learnExact(ask, opt) {
     const key = this._key(ask);
     const s = this.streaks.get(key);
     const streak = s && s.option === opt.id ? { ...s, count: s.count + 1 } : { option: opt.id, count: 1 };
     this.streaks.set(key, streak);
-    if (streak.count < this.config.learnThreshold) return;
-    if (this.declined.has(`${key}\u0000${opt.id}`)) return;
-    if ([...this.suggestions.values()].some((x) => x.key === key)) return;
-    if (this.rules.list.some((r) => r.action.answer != null && r.match.fingerprint === escapeGlob(ask.fingerprint))) return;
-    const sug = {
+    if (streak.count < this.config.learnThreshold) return false;
+    if (this.declined.has(`${key}\u0000${opt.id}`)) return false;
+    if ([...this.suggestions.values()].some((x) => x.key === key)) return true;
+    if (this.rules.list.some((r) => r.action.answer != null && r.match.fingerprint === escapeGlob(ask.fingerprint))) return true;
+    return this._suggest({
       id: newId('sug'),
+      kind: 'answer',
       key,
       agent: { id: ask.agent.id, name: ask.agent.name },
       fingerprint: ask.fingerprint,
@@ -433,11 +521,9 @@ export class Router extends EventEmitter {
       label: opt.label,
       count: streak.count,
       question: ask.question,
+      why: `You answered “${opt.label}” the last ${streak.count} times`,
       created_at: this.clock(),
-    };
-    this.suggestions.set(sug.id, sug);
-    this.ledger.append('suggestion.created', { id: sug.id, agent: sug.agent.id, fingerprint: sug.fingerprint, option: sug.option, count: sug.count });
-    this.emit('rules');
+    });
   }
 
   _ruleFromAsk(ask, opt, source, note) {
@@ -451,7 +537,9 @@ export class Router extends EventEmitter {
     const s = this.suggestions.get(id);
     if (!s) throw httpError(404, `no suggestion ${id}`);
     this.suggestions.delete(id);
-    const rule = this.rules.add({ match: { agent: escapeGlob(s.agent.id), fingerprint: escapeGlob(s.fingerprint) }, action: { answer: s.option }, note: `Learned: you chose "${s.label}" ${s.count}× in a row` }, 'learned');
+    const rule = s.kind === 'route'
+      ? this.rules.add({ match: s.match, action: s.action, note: `Learned: ${s.why}` }, 'learned')
+      : this.rules.add({ match: { agent: escapeGlob(s.agent.id), fingerprint: s.glob ? s.fingerprint : escapeGlob(s.fingerprint) }, action: { answer: s.option }, note: `Learned: ${s.why || `you chose "${s.label}" ${s.count}× in a row`}` }, 'learned');
     this.ledger.append('rule.created', { rule, from_suggestion: id });
     this.applyRulesToOpen();
     this.emit('rules');
@@ -554,6 +642,8 @@ export class Router extends EventEmitter {
       asks: [...this.asks.values()],
       bundle: this.bundle,
       streaks: [...this.streaks],
+      answerLog: this.answerLog,
+      fyiLog: [...this.fyiLog],
       suggestions: [...this.suggestions.values()],
       declined: [...this.declined],
       stats: this.stats,
@@ -566,6 +656,8 @@ export class Router extends EventEmitter {
     for (const a of data.asks || []) this.asks.set(a.id, a);
     this.bundle = data.bundle || null;
     this.streaks = new Map(data.streaks || []);
+    this.answerLog = data.answerLog || [];
+    this.fyiLog = new Map(data.fyiLog || []);
     this.suggestions = new Map((data.suggestions || []).map((s) => [s.id, s]));
     this.declined = new Set(data.declined || []);
     Object.assign(this.stats, data.stats || {});

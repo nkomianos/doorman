@@ -37,9 +37,11 @@ const xml = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&g
 // instead of borrowing PowerShell's id, whose banners Windows often hides.
 const WIN_APP_ID = 'Doorman';
 const psq = (s) => String(s).replace(/'/g, "''");
-function windowsToastScript({ title, body, url, urgency }, icon) {
+function windowsToastScript({ title, body, url, urgency }, icon, actions = []) {
   const scenario = urgency === 'critical' ? ' scenario="urgent"' : '';
-  const toast = `<toast activationType="protocol" launch="${xml(url)}"${scenario}><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body)}</text></binding></visual><actions><action content="Open inbox" activationType="protocol" arguments="${xml(url)}"/></actions></toast>`;
+  // Up to 4 answer buttons (doorman:// links), then "Open inbox". Windows allows 5.
+  const buttons = [...actions.slice(0, 4).map((a) => ({ label: a.label, url: a.url })), { label: actions.length ? 'Open' : 'Open inbox', url }];
+  const toast = `<toast activationType="protocol" launch="${xml(url)}"${scenario}><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body)}</text></binding></visual><actions>${buttons.map((b) => `<action content="${xml(b.label)}" activationType="protocol" arguments="${xml(b.url)}"/>`).join('')}</actions></toast>`;
   return [
     "$ErrorActionPreference = 'Stop'",
     `$key = 'HKCU:\\Software\\Classes\\AppUserModelId\\${WIN_APP_ID}'`,
@@ -71,12 +73,12 @@ function windowsToastScript({ title, body, url, urgency }, icon) {
 }
 
 /** Best-effort native notification. Never throws; resolves to {ok, error}. */
-export function desktopNotify({ title, body, url, urgency }, { icon = null } = {}) {
+export function desktopNotify({ title, body, url, urgency }, { icon = null, actions = [] } = {}) {
   return new Promise((resolve) => {
     try {
       let child;
       if (process.platform === 'win32') {
-        const encoded = Buffer.from(windowsToastScript({ title, body, url, urgency }, icon), 'utf16le').toString('base64');
+        const encoded = Buffer.from(windowsToastScript({ title, body, url, urgency }, icon, actions), 'utf16le').toString('base64');
         child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
       } else if (process.platform === 'darwin') {
         const q = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -96,6 +98,14 @@ export function desktopNotify({ title, body, url, urgency }, { icon = null } = {
       resolve({ ok: false, error: e.message });
     }
   });
+}
+
+/** One-tap answer buttons (phone, desktop) carry an HMAC of ask + option. */
+export const signAction = (secret, askId, option) => createHmac('sha256', secret).update(`${askId}:${option}`).digest('hex').slice(0, 24);
+export function verifyAction(secret, askId, option, sig) {
+  const want = Buffer.from(signAction(secret, askId, option));
+  const got = Buffer.from(String(sig || ''));
+  return want.length === got.length && timingSafeEqual(want, got);
 }
 
 const NTFY_PRIORITY = { low: 2, normal: 3, high: 4, critical: 5 };
@@ -122,13 +132,11 @@ export class Ntfy {
   }
 
   sign(askId, option) {
-    return createHmac('sha256', this.secret).update(`${askId}:${option}`).digest('hex').slice(0, 24);
+    return signAction(this.secret, askId, option);
   }
 
   verify(askId, option, sig) {
-    const want = Buffer.from(this.sign(askId, option));
-    const got = Buffer.from(String(sig || ''));
-    return want.length === got.length && timingSafeEqual(want, got);
+    return verifyAction(this.secret, askId, option, sig);
   }
 
   _headers() {

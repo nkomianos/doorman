@@ -13,11 +13,17 @@ export const DEFAULT_CONFIG = {
   desktop: true,
   // { server: "https://ntfy.sh", topic: "<secret>", token?: "...", redact: false, mirror: "always" | "away" }
   ntfy: null,
+  // { token: "<bot token from @BotFather>", chatId, userId, mirror: "always" | "away", redact: false }
+  telegram: null,
+  // Opt-in: keyboard/mouse idle time and the name of the app in front. Never window titles.
+  activity: { enabled: false, awayAfterMinutes: 10, meetings: true, editorFocus: false },
+  // Show what Claude Code / Codex sessions are doing, read from their own logs on this machine.
+  sessions: true,
   hookWaitSeconds: 600,
 };
 
 // Settings the inbox UI / PATCH /v1/config may change.
-export const EDITABLE_KEYS = ['quietHours', 'calendar', 'digest', 'ntfy', 'desktop', 'bundleWindowMs', 'learnThreshold', 'hookWaitSeconds'];
+export const EDITABLE_KEYS = ['quietHours', 'calendar', 'digest', 'ntfy', 'telegram', 'activity', 'sessions', 'desktop', 'bundleWindowMs', 'learnThreshold', 'hookWaitSeconds'];
 
 export function doormanHome() {
   return process.env.DOORMAN_HOME || join(homedir(), '.doorman');
@@ -32,6 +38,7 @@ export function paths(home = doormanHome()) {
     ledger: join(home, 'ledger.jsonl'),
     token: join(home, 'token'),
     daemon: join(home, 'daemon.json'),
+    keys: join(home, 'keys.json'),
     log: join(home, 'daemon.log'),
   };
 }

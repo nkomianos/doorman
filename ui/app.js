@@ -7,7 +7,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const trunc = (s, n) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-const VIEWS = ['inbox', 'updates', 'snoozed', 'history', 'agents', 'rules', 'activity', 'settings'];
+const VIEWS = ['inbox', 'updates', 'snoozed', 'history', 'now', 'connect', 'agents', 'rules', 'activity', 'settings'];
 const UNDO_MS = 5000;
 const URG = ['low', 'normal', 'high', 'critical'];
 
@@ -41,6 +41,15 @@ const S = {
   histFilter: 'all',
   histQuery: '',
   ruleForm: false,
+  integrations: [],
+  keys: [],
+  newKey: null, // shown once after creating
+  now: null,
+  calendar: null,
+  calProvider: 'google',
+  calDraft: '',
+  calPreview: null,
+  snippetLang: 'curl',
   settingsDirty: false,
   testResult: null,
   connected: false,
@@ -74,6 +83,10 @@ const PATHS = {
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
   wake: '<path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>',
   mute: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
+  pulse: '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',
   sound: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
 };
 const I = (name, size = 16) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -154,6 +167,10 @@ const loadStats = async () => { S.stats = (await api('GET', '/v1/stats')).stats;
 const loadHistory = async () => { S.history = (await api('GET', '/v1/asks?status=closed&limit=300')).asks; };
 const loadLedger = async () => { S.ledger = (await api('GET', '/v1/ledger?limit=200')).entries; };
 const loadConfig = async () => { S.config = await api('GET', '/v1/config'); };
+const loadIntegrations = async () => { S.integrations = (await api('GET', '/v1/integrations')).integrations; };
+const loadKeys = async () => { S.keys = (await api('GET', '/v1/keys')).keys; };
+const loadNow = async () => { S.now = await api('GET', '/v1/now'); };
+const loadCalendar = async () => { S.calendar = await api('GET', '/v1/calendar'); };
 
 const isOpen = (a) => a.status === 'pending' || a.status === 'unread';
 const visible = (a) => isOpen(a) && !S.hidden.has(a.id);
@@ -492,22 +509,6 @@ function emptyState(icon, title, text, extra = '') {
   return `<div class="empty"><div class="art">${I(icon, 26)}</div><h2>${title}</h2><p>${text}</p>${extra}</div>`;
 }
 
-function viewWelcome() {
-  const cli = S.config?.cli || 'doorman';
-  return `<section class="welcome">
-    <h2>Welcome to Doorman</h2>
-    <p>Doorman sits between your AI agents and you. Every request lands here, and Doorman decides which ones are worth interrupting you for, and when.</p>
-    <div class="steps">
-      <div class="step"><h3>See it with sample agents</h3><p>Three made-up agents send you 12 requests in a few seconds. See how few of them actually ping you.</p>
-        <div class="form-actions"><button class="btn primary" data-act="demo">${I('play', 14)} Run the demo</button></div></div>
-      <div class="step"><h3>Connect Claude Code</h3><p>Permission prompts and “I'm done” messages come here instead of waiting in a terminal. Run this once:</p>
-        <div class="form-actions">${cmdBox(`${cli} setup claude-code --write`)}</div></div>
-      <div class="step"><h3>Get pings on your phone</h3><p>Optional. Answer from your lock screen with one tap.</p>
-        <div class="form-actions"><button class="btn" data-act="go" data-view="settings" data-anchor="phone">${I('phone', 14)} Set up phone</button></div></div>
-    </div>
-  </section>`;
-}
-
 const cmdBox = (cmd) => `<div class="cmd"><code>${esc(cmd)}</code><button class="btn ghost sm" data-act="copy" data-text="${esc(cmd)}" aria-label="Copy command">${I('copy', 14)} Copy</button></div>`;
 
 function viewInbox() {
@@ -521,10 +522,10 @@ function viewInbox() {
     : '';
   const head = pageHead('Needs you', sub);
   if (!total) {
-    const fresh = !S.stats?.asks && !S.agents.length;
-    if (fresh && S.loaded) return head + viewWelcome();
     const s = S.stats || {};
-    return head + emptyState('check', 'You’re all caught up', s.asks
+    const checklist = S.loaded ? setupChecklist({ compact: !!s.asks }) : '';
+    if (checklist && !s.asks) return head + checklist;
+    return head + checklist + emptyState('check', 'You’re all caught up', s.asks
       ? `Doorman has handled ${plural(s.asks, 'request')} and interrupted you ${plural(s.notifications || 0, 'time')}. New decisions will show up here.`
       : 'When an agent needs a decision, it lands here.', `<button class="btn" data-act="demo">${I('play', 14)} Try with sample agents</button>`);
   }
@@ -629,7 +630,7 @@ function viewHistory() {
       <span class="ico ${o.cls}">${I(o.icon, 15)}</span>
       <div><div class="title">${esc(a.question)}</div><div class="sub"><span>${esc(a.agent.name)}</span><span>·</span><span>${esc(o.text)}</span></div></div>
       <div class="side">${fmtTime(t)}</div>
-      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Doorman pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}</div>` : ''}
+      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Doorman pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}${a.status === 'auto' && String(a.answer?.by).startsWith('rule:') && S.rules.some((r) => r.id === a.answer.by.slice(5)) ? `<div class="form-actions"><button class="btn sm" data-act="rule-rm" data-id="${esc(a.answer.by.slice(5))}">Stop answering this for me</button></div>` : ''}</div>` : ''}
     </div>`;
   }
   return `${html}${rows}</div>`;
@@ -693,9 +694,12 @@ function viewRules() {
   if (S.suggestions.length) {
     html += `<div class="section-title">${I('sparkle', 14)} Suggested from your answers</div>`;
     html += S.suggestions.map((s) => `<div class="suggestion">
-      <div class="card-head" style="margin:0">${avatar(s.agent)}<div class="who"><b>${esc(s.agent.name)}</b><span>You answered “${esc(s.label)}” ${s.count} times in a row</span></div></div>
-      <p class="sentence">Answer <b>“${esc(s.label)}”</b> automatically whenever ${esc(s.agent.name)} asks <code>${esc(s.fingerprint)}</code>?</p>
-      <div class="form-actions"><button class="btn primary" data-act="sug-accept" data-id="${s.id}">${I('check', 15)} Make it a rule</button><button class="btn ghost" data-act="sug-decline" data-id="${s.id}">Keep asking me</button></div>
+      <div class="card-head" style="margin:0">${avatar(s.agent)}<div class="who"><b>${esc(s.agent.name)}</b><span>${esc(s.why || `You answered “${s.label}” ${s.count} times in a row`)}</span></div></div>
+      <p class="sentence">${s.kind === 'route' ? esc(s.sentence)
+        : s.glob ? `Answer <b>“${esc(s.label)}”</b> automatically to anything ${esc(s.agent.name)} asks that matches <code>${esc(s.fingerprint)}</code>?`
+          : `Answer <b>“${esc(s.label)}”</b> automatically whenever ${esc(s.agent.name)} asks <code>${esc(s.fingerprint)}</code>?`}</p>
+      ${s.examples?.length ? `<p class="help" style="margin:-6px 0 12px">For example: ${s.examples.map((x) => `<code>${esc(x)}</code>`).join(' ')}</p>` : ''}
+      <div class="form-actions"><button class="btn primary" data-act="sug-accept" data-id="${s.id}">${I('check', 15)} ${s.kind === 'route' ? 'Yes, use the digest' : 'Make it a rule'}</button><button class="btn ghost" data-act="sug-decline" data-id="${s.id}">Keep asking me</button></div>
     </div>`).join('');
   }
   html += `<div class="section-title">Your rules <span class="hint">· checked top to bottom</span></div>`;
@@ -760,7 +764,7 @@ function testBoxHtml() {
 
 function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
   return `${pageHead('Settings', 'Changes apply right away once you save.')}
-  <div class="settings-nav">${['notifications', 'phone', 'schedule', 'delivery', 'connect'].map((k) => `<a class="chip-btn" href="#settings/${k}" data-anchor-link="${k}">${{ notifications: 'Notifications', phone: 'Phone', schedule: 'Schedule', delivery: 'Delivery', connect: 'Connect agents' }[k]}</a>`).join('')}</div>
+  <div class="settings-nav">${['notifications', 'phone', 'schedule', 'privacy', 'delivery', 'connect'].map((k) => `<a class="chip-btn" href="#settings/${k}" data-anchor-link="${k}">${{ notifications: 'Notifications', phone: 'Phone', schedule: 'Schedule', privacy: 'Privacy', delivery: 'Delivery', connect: 'Connect agents' }[k]}</a>`).join('')}</div>
   <form id="settings" class="form" autocomplete="off">
     <section class="panel" id="s-notifications">
       <h2>Notifications on this computer</h2>
@@ -773,8 +777,8 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
     </section>
 
     <section class="panel" id="s-phone">
-      <h2>Phone</h2>
-      <p class="help">Pings with one-tap answer buttons, through the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app. Your answers come back over a signed channel, so nothing on this computer is exposed to the internet.</p>
+      <h2>Phone (ntfy)</h2>
+      <p class="help">Prefer Telegram? Set it up on the <a href="#connect/phone" data-view="connect">Connect</a> page. ntfy: pings with one-tap answer buttons, through the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app. Your answers come back over a signed channel, so nothing on this computer is exposed to the internet.</p>
       <div class="grid2">
         <label class="field"><span>Topic <small>treat it like a password</small></span><span style="display:flex;gap:6px"><input name="n_topic" value="${esc(n.topic || '')}" placeholder="Click Generate"><button class="btn" type="button" data-act="gen-topic">Generate</button></span></label>
         <label class="field">Send to phone<select name="n_mirror"><option value="always" ${n.mirror !== 'away' ? 'selected' : ''}>Every time Doorman pings me</option><option value="away" ${n.mirror === 'away' ? 'selected' : ''}>Only when I'm away</option></select></label>
@@ -799,6 +803,13 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
         <label class="field">Events that mean Do not disturb<input name="cal_kw" value="${esc((cal.dndKeywords || ['focus time', 'deep work', 'do not disturb']).join(', '))}"></label>
       </div>
       ${cs.configured ? (cs.error ? `<div class="callout bad">${I('alert', 16)}<div>Couldn't read the calendar: ${esc(cs.error)}</div></div>` : `<div class="callout ok">${I('check', 16)}<div>Calendar connected: ${plural(cs.events_next_48h, 'busy block')} in the next 48 hours.</div></div>`) : ''}
+    </section>
+
+    <section class="panel" id="s-privacy">
+      <h2>Privacy</h2>
+      <p class="help">Everything below stays on this computer. Agents only ever see Available, Focus, Do not disturb or Away.</p>
+      <label class="toggle"><input type="checkbox" name="sessions" ${c.sessions !== false ? 'checked' : ''}><span class="sw"></span><span>Show what my Claude Code and Codex sessions are doing on the Now page (reads their logs in <code>~/.claude</code> and <code>~/.codex</code>)</span></label>
+      <p class="help">Activity sensing (idle time and the front app) is set on the <a href="#connect/activity" data-view="connect">Connect</a> page. It’s ${c.activity?.enabled ? '<b>on</b>' : 'off'}.</p>
     </section>
 
     <section class="panel" id="s-delivery">
@@ -828,7 +839,182 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
   <p class="help">Doorman ${esc(VERSION)} · data in <span class="mono">${esc(S.config.home)}</span> · port ${S.config.port}</p>`;
 }
 
+// ------------------------------------------------------------ now & setup
+
+/** The four things that make Doorman useful, and whether each is done. */
+function setupSteps() {
+  const c = S.config?.config || {};
+  const realAgents = S.agents.filter((g) => !g.id.startsWith('demo-'));
+  return [
+    { key: 'demo', title: 'See it with sample agents', text: 'Three made-up agents send 12 requests at once. See how few of them actually ping you.', done: (S.stats?.asks || 0) > 0, action: `<button class="btn primary sm" data-act="demo">${I('play', 14)} Run the demo</button>` },
+    { key: 'agents', title: 'Connect your agents', text: 'One click for Claude Code, Codex, Cursor or Claude Desktop. Anything else can use a key.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>` },
+    { key: 'phone', title: 'Get pings on your phone', text: 'Answer from your lock screen with one tap, through Telegram or ntfy.', done: !!(S.config?.telegram?.paired || c.ntfy?.topic), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="phone">${I('phone', 14)} Set up phone</button>` },
+    { key: 'context', title: 'Tell Doorman when you’re busy', text: 'Connect a calendar, or let it notice when you step away or join a call.', done: !!(c.calendar?.ics || c.activity?.enabled), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="calendar">${I('calendar', 14)} Calendar &amp; activity</button>` },
+  ];
+}
+
+function setupChecklist({ compact = false } = {}) {
+  const steps = setupSteps();
+  const done = steps.filter((s) => s.done).length;
+  if (done === steps.length) return '';
+  return `<section class="welcome${compact ? ' compact' : ''}">
+    <div class="welcome-head"><div><h2>${compact ? 'Finish setting up' : 'Welcome to Doorman'}</h2>
+      <p>${compact ? `${done} of ${steps.length} done.` : 'Doorman sits between your AI agents and you. Every request lands here, and Doorman decides which ones are worth interrupting you for, and when.'}</p></div>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${steps.length}" aria-valuenow="${done}" aria-label="Setup progress"><i style="width:${(done / steps.length) * 100}%"></i></div></div>
+    <ol class="checklist">${steps.map((s) => `<li class="${s.done ? 'is-done' : ''}">
+      <span class="tick" aria-hidden="true">${s.done ? I('check', 14) : ''}</span>
+      <div><h3>${s.title}${s.done ? '<span class="visually-hidden"> (done)</span>' : ''}</h3><p>${s.text}</p></div>
+      ${s.done ? '' : `<div class="form-actions">${s.action}</div>`}
+    </li>`).join('')}</ol>
+  </section>`;
+}
+
+const SESSION_STATUS = { working: ['Working', 'working'], waiting: ['Needs you', 'waiting'], done: ['Done', 'done'], idle: ['Idle', 'idle'] };
+
+function viewNow() {
+  const n = S.now;
+  let html = pageHead('Now', 'What you and your agents are up to, from this computer only.');
+  if (!n) return `${html}<p class="help">Loading…</p>`;
+  const st = n.state;
+  const act = n.state.activity;
+  const L = lists();
+  const waiting = L.now.length + L.quiet.length;
+  const actLine = act
+    ? act.idle_ms > 120000 ? `Idle for ${fmtLeft(act.idle_ms)}` : `${act.app ? `${esc(act.app)} in front` : 'Active'}${act.category === 'meeting' ? ' · looks like a call' : act.category === 'editor' ? ' · working' : ''}`
+    : null;
+  html += `<div class="now-grid">
+    <section class="panel you">
+      <div class="you-head"><span class="dot ${st.mode}"></span><div><h2>${esc(MODES[st.mode]?.label ?? st.mode)}</h2><p class="help" style="margin:0">${esc(MODES[st.mode]?.desc ?? '')}</p></div></div>
+      <dl class="facts-list">
+        <div><dt>Why</dt><dd>${esc({ manual: 'You set it', calendar: 'Your calendar', 'quiet-hours': 'Quiet hours', activity: `Activity: ${st.note || ''}`, default: 'Nothing says you’re busy' }[st.source] || st.source)}${st.until ? ` · until ${esc(fmtWhen(st.until))}` : ''}</dd></div>
+        <div><dt>Activity</dt><dd>${actLine || (n.activity_enabled ? 'Waiting for the first reading…' : `Off · <button class="link-btn" data-act="go" data-view="connect" data-anchor="activity">turn on</button>`)}</dd></div>
+        <div><dt>Next busy</dt><dd>${n.upcoming?.length ? esc(`${fmtWhen(n.upcoming[0].start)}–${fmtTime(n.upcoming[0].end)}`) : S.config?.config?.calendar?.ics ? 'Nothing in the next 2 days' : `No calendar · <button class="link-btn" data-act="go" data-view="connect" data-anchor="calendar">connect</button>`}</dd></div>
+        <div><dt>Waiting on you</dt><dd>${waiting ? `<button class="link-btn" data-act="go" data-view="inbox">${plural(waiting, 'decision')}</button>` : 'Nothing'}</dd></div>
+      </dl>
+    </section>
+  </div>`;
+  html += `<div class="section-title">${I('bot', 14)} Agent sessions <span class="hint">· read from Claude Code and Codex logs on this computer</span></div>`;
+  if (!n.sessions_enabled) return html + emptyState('bot', 'Session view is off', 'Turn it on in Settings to see what your Claude Code and Codex sessions are doing.');
+  if (!n.sessions.length) return html + emptyState('bot', 'No recent sessions', 'Start Claude Code or Codex and its sessions show up here within a few seconds.');
+  html += `<div class="list">${n.sessions.map((s) => {
+    const [label, cls] = SESSION_STATUS[s.status] || [s.status, 'idle'];
+    return `<div class="item session">
+      <span class="pulse ${cls}" aria-hidden="true"></span>
+      <div><div class="title">${esc(s.title)}</div><div class="sub"><span>${esc(s.agent)}</span>${s.project ? `<span>·</span><span class="mono">${esc(s.project)}</span>` : ''}${s.branch ? `<span>·</span><span class="mono">${esc(s.branch)}</span>` : ''}<span>·</span><span>${esc(s.detail)}</span></div></div>
+      <div class="side"><span class="status-pill ${cls}">${label}</span><span title="${esc(new Date(s.last_activity).toLocaleString())}">${fmtAgo(s.last_activity)}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+  return html;
+}
+
+const CAL_HELP = {
+  google: ['Google Calendar', 'Open Google Calendar on the web → <b>Settings</b> (gear) → under “Settings for my calendars” pick your calendar → <b>Integrate calendar</b> → copy <b>Secret address in iCal format</b>.'],
+  outlook: ['Outlook', 'Outlook on the web → <b>Settings</b> → <b>Calendar</b> → <b>Shared calendars</b> → “Publish a calendar” → pick your calendar and <b>Can view all details</b> → <b>Publish</b> → copy the <b>ICS</b> link.'],
+  apple: ['Apple iCloud', 'In the Calendar app or on iCloud.com, right-click your calendar → <b>Share Calendar</b> → tick <b>Public Calendar</b> → copy the link. A <code>webcal://</code> link works.'],
+  other: ['Other', 'Any calendar that can publish an <b>.ics</b> link works, or the path to an <b>.ics</b> file on this computer.'],
+};
+
+function snippet(lang, key) {
+  const url = location.origin;
+  const k = key || '<your agent key>';
+  return {
+    curl: `curl -s ${url}/v1/asks?wait=25s \\\n  -H "Authorization: Bearer ${k}" \\\n  -H "content-type: application/json" \\\n  -d '{"question":"Deploy v2 to production?","options":["Deploy","Wait"],"default":"Wait","deadline":"30m"}'`,
+    python: `import requests\n\nr = requests.post("${url}/v1/asks?wait=25s",\n    headers={"Authorization": "Bearer ${k}"},\n    json={"question": "Deploy v2 to production?", "options": ["Deploy", "Wait"],\n          "default": "Wait", "deadline": "30m"})\nask = r.json()\nwhile not ask.get("final"):\n    ask = requests.get(f"${url}/v1/asks/{ask['id']}/wait", headers={"Authorization": "Bearer ${k}"}).json()\nprint(ask["answer"]["label"])`,
+    js: `import { DoormanClient } from 'doorman-attention/client';\n\nconst doorman = new DoormanClient({ url: '${url}', token: '${k}' });\nconst r = await doorman.ask({ question: 'Deploy v2 to production?', options: ['Deploy', 'Wait'], default: 'Wait', deadline: '30m' });\nconsole.log(r.answer?.label);`,
+    mcp: JSON.stringify({ mcpServers: { doorman: { command: 'node', args: [S.config?.cli?.match(/"(.+)"/)?.[1] || 'bin/doorman.js', 'mcp'], env: { DOORMAN_TOKEN: k } } } }, null, 2),
+  }[lang];
+}
+
+function viewConnect() {
+  const c = S.config?.config || {};
+  const tg = S.config?.telegram;
+  const tgc = c.telegram;
+  let html = pageHead('Connect', 'Everything Doorman needs to reach you, and for your agents to reach Doorman.');
+  html += setupChecklist({ compact: true });
+
+  // Agents on this computer
+  html += `<section class="panel" id="s-agents"><h2>Agents on this computer</h2><p class="help">Doorman edits each agent’s config for you and keeps a backup next to it (<code>.doorman-bak</code>). You can disconnect any time.</p>
+    <div class="integrations">${S.integrations.map((i) => `<div class="integration${i.connected ? ' on' : ''}">
+      <div class="int-head"><b>${esc(i.name)}</b><span class="status-pill ${i.connected ? 'done' : i.detected ? 'idle' : 'off'}">${i.connected ? 'Connected' : i.detected ? 'Installed' : 'Not found'}</span></div>
+      <p>${esc(i.description)}</p>
+      <div class="form-actions">${i.connected
+        ? `<button class="btn sm" data-act="integration" data-id="${i.id}" data-on="0">Disconnect</button>`
+        : `<button class="btn ${i.detected ? 'primary ' : ''}sm" data-act="integration" data-id="${i.id}" data-on="1">${I('link', 14)} Connect</button>`}
+        <details class="snippet"><summary>Do it by hand</summary><p class="help">Add to <code>${esc(i.file)}</code>:</p><pre class="full">${esc(i.snippet)}</pre>${i.extra ? `<p class="help">Optional, for an ask_human tool:</p>${cmdBox(i.extra)}` : ''}</details>
+      </div>
+    </div>`).join('') || '<p class="help">Loading…</p>'}</div>
+  </section>`;
+
+  // Phone
+  html += `<section class="panel" id="s-phone"><h2>Your phone</h2><p class="help">Pick one. Both are free, give you one-tap answer buttons, and never expose this computer to the internet: Doorman only makes outgoing connections.</p>
+    <div class="phone-options">
+      <div class="phone-card">
+        <div class="int-head"><b>Telegram</b>${tg?.paired ? '<span class="status-pill done">Connected</span>' : '<span class="status-pill idle">Recommended</span>'}</div>
+        ${tg?.paired ? `<p>Connected through <b>@${esc(tg.bot?.username || 'your bot')}</b>${tgc?.username ? ` to <b>${esc(tgc.username)}</b>` : ''}. Requests arrive with buttons; reply to a message to answer a question. Commands: <code>/status</code> <code>/inbox</code> <code>/focus 1h</code> <code>/away</code>.</p>
+          <div class="grid2 form" style="margin-top:0">
+            <label class="field">Send to Telegram<select data-tg="mirror"><option value="always" ${tgc?.mirror !== 'away' ? 'selected' : ''}>Every time Doorman pings me</option><option value="away" ${tgc?.mirror === 'away' ? 'selected' : ''}>Only when I’m away</option></select></label>
+            <label class="toggle" style="align-self:end"><input type="checkbox" data-tg="redact" ${tgc?.redact ? 'checked' : ''}><span class="sw"></span><span>Hide question text</span></label>
+          </div>
+          <div class="form-actions"><button class="btn sm" data-act="test-notify">${I('bell', 14)} Send a test</button><button class="btn ghost sm" data-act="tg-remove">Disconnect</button></div>`
+        : tg?.bot ? `<ol class="mini-steps"><li class="is-done">Bot <b>@${esc(tg.bot.username)}</b> is ready.</li><li>On your phone, open <a href="https://t.me/${esc(tg.bot.username)}?start=${esc(tg.pair_code)}" target="_blank" rel="noreferrer">t.me/${esc(tg.bot.username)}</a> and tap <b>Start</b>. Or send it <code>/start ${esc(tg.pair_code)}</code>.</li></ol>
+          <p class="help"><span class="spinner inline" aria-hidden="true"></span> Waiting for you to press Start…</p><div class="form-actions"><button class="btn ghost sm" data-act="tg-remove">Use a different bot</button></div>`
+        : `<ol class="mini-steps">
+            <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>, send <code>/newbot</code> and pick any name. It replies with a token.</li>
+            <li>Paste the token here:<div class="inline-form"><input class="input" type="password" autocomplete="off" placeholder="123456789:AA…" data-tg-token aria-label="Telegram bot token"><button class="btn primary sm" data-act="tg-save">Connect</button></div>${tg?.error ? `<span class="bad-t help">${esc(tg.error)}</span>` : ''}</li>
+            <li>Tap Start on your new bot. Doorman shows you the link.</li></ol>`}
+      </div>
+      <div class="phone-card">
+        <div class="int-head"><b>ntfy</b>${c.ntfy?.topic ? '<span class="status-pill done">Connected</span>' : ''}</div>
+        <p>An open-source push app. No account needed: subscribe to a secret topic and you’re done. Good if you don’t use Telegram.</p>
+        <div class="form-actions"><button class="btn sm" data-act="go" data-view="settings" data-anchor="phone">${c.ntfy?.topic ? 'Settings' : 'Set up ntfy'}</button></div>
+      </div>
+    </div>
+  </section>`;
+
+  // Calendar
+  const [provName, provHelp] = CAL_HELP[S.calProvider];
+  const cal = S.calendar;
+  html += `<section class="panel" id="s-calendar"><h2>Calendar</h2><p class="help">During meetings Doorman holds everything but urgent requests, then delivers them in one go when the meeting ends. The calendar is read on this computer. Agents only ever see “Focus” or “Available”, never your events.</p>
+    ${c.calendar?.ics ? `<div class="callout ${cal?.status?.error ? 'bad' : 'ok'}">${I(cal?.status?.error ? 'alert' : 'check', 16)}<div>${cal?.status?.error ? `Couldn’t read your calendar: ${esc(cal.status.error)}` : `<b>Connected.</b> ${plural(cal?.status?.events_next_48h ?? 0, 'busy block')} in the next 48 hours.`}</div></div>
+      ${cal?.upcoming?.length ? `<ul class="events">${cal.upcoming.map((e) => `<li><span class="when">${esc(fmtWhen(e.start))}–${esc(fmtTime(e.end))}</span><span class="what">${esc(e.summary || 'Busy')}</span><span class="status-pill ${e.mode === 'dnd' ? 'waiting' : 'idle'}">${esc(MODES[e.mode]?.label ?? e.mode)}</span></li>`).join('')}</ul>` : ''}
+      <div class="form-actions" style="margin-top:12px"><button class="btn ghost sm" data-act="cal-remove">Disconnect calendar</button></div>`
+    : `<div class="chips" role="tablist" aria-label="Calendar provider">${Object.entries(CAL_HELP).map(([k, [n]]) => `<button class="chip-btn" role="tab" data-act="cal-provider" data-key="${k}" aria-pressed="${S.calProvider === k}">${n}</button>`).join('')}</div>
+      <p class="cal-help">${provHelp}</p>
+      <div class="inline-form"><input class="input" data-cal-url placeholder="Paste the ${esc(provName)} calendar link" value="${esc(S.calDraft)}" aria-label="Calendar link"><button class="btn sm" data-act="cal-test">Test</button></div>
+      ${S.calPreview ? (S.calPreview.error ? `<div class="callout bad">${I('alert', 16)}<div>${esc(S.calPreview.error)}</div></div>`
+        : `<div class="callout ok">${I('check', 16)}<div>Found <b>${plural(S.calPreview.count, 'busy block')}</b> in the next 7 days.${S.calPreview.events.length ? `<ul class="events">${S.calPreview.events.map((e) => `<li><span class="when">${esc(fmtWhen(e.start))}–${esc(fmtTime(e.end))}</span><span class="what">${esc(e.summary || 'Busy')}</span></li>`).join('')}</ul>` : ''}</div></div>
+          <div class="form-actions" style="margin-top:12px"><button class="btn primary sm" data-act="cal-save">Use this calendar</button></div>`) : ''}`}
+  </section>`;
+
+  // Activity
+  const a = c.activity || {};
+  html += `<section class="panel" id="s-activity"><h2>Notice when I’m away or on a call</h2>
+    <p class="help">Optional. Doorman checks two things every 10 seconds: how long since you touched the keyboard or mouse, and the <i>name</i> of the app in front (like “Zoom” or “VS Code”). Never window titles, never what you type, never screenshots. Nothing is stored or sent anywhere.</p>
+    ${S.config?.activity_supported === false ? '<div class="callout warn">Not supported on this system yet.</div>' : `
+    <label class="toggle"><input type="checkbox" data-act-cfg="enabled" ${a.enabled ? 'checked' : ''}><span class="sw"></span><span><b>Sense my activity</b></span></label>
+    <div class="activity-opts${a.enabled ? '' : ' is-off'}">
+      <label class="toggle"><input type="checkbox" data-act-cfg="meetings" ${a.meetings !== false ? 'checked' : ''} ${a.enabled ? '' : 'disabled'}><span class="sw"></span><span>Treat Zoom, Teams, Webex and FaceTime as <b>Focus</b></span></label>
+      <label class="toggle"><input type="checkbox" data-act-cfg="editorFocus" ${a.editorFocus ? 'checked' : ''} ${a.enabled ? '' : 'disabled'}><span class="sw"></span><span>Treat my editor and terminal as <b>Focus</b> (only urgent requests interrupt while I code)</span></label>
+      <label class="field inline-field">Mark me <b>Away</b> after<input class="input" type="number" min="2" max="120" data-act-cfg="awayAfterMinutes" value="${a.awayAfterMinutes ?? 10}" ${a.enabled ? '' : 'disabled'}><span>minutes without input. Urgent requests then go to your phone.</span></label>
+    </div>`}
+  </section>`;
+
+  // Other agents
+  html += `<section class="panel" id="s-other"><h2>Any other agent or script</h2>
+    <p class="help">Anything that can make an HTTP request can ask you something. Give each one its own <b>agent key</b>: a key can only send requests and read your status (Available, Focus…). It can’t answer, read your inbox or pretend to be another agent.</p>
+    <div class="inline-form"><input class="input" data-key-name placeholder="Name it, e.g. Nightly backup" aria-label="Key name"><button class="btn primary sm" data-act="key-create">${I('key', 14)} Create key</button></div>
+    ${S.newKey ? `<div class="callout ok">${I('key', 16)}<div><b>Copy this key now.</b> It won’t be shown again.${cmdBox(S.newKey.key)}</div></div>` : ''}
+    ${S.keys.length ? `<div class="list keys">${S.keys.map((k) => `<div class="item"><span class="ico">${I('key', 15)}</span><div><div class="title">${esc(k.name)}</div><div class="sub"><span class="mono">${esc(k.prefix)}…</span><span>·</span><span>agent id <span class="mono">${esc(k.agent_id)}</span></span><span>·</span><span>${k.last_used ? `used ${fmtAgo(k.last_used)}` : 'never used'}</span></div></div><div class="side"><button class="btn ghost sm" data-act="key-revoke" data-id="${k.id}">Revoke</button></div></div>`).join('')}</div>` : ''}
+    <div class="chips" role="tablist" aria-label="Example" style="margin-top:16px">${[['curl', 'curl'], ['python', 'Python'], ['js', 'JavaScript'], ['mcp', 'MCP config']].map(([k, n]) => `<button class="chip-btn" role="tab" data-act="snippet-lang" data-key="${k}" aria-pressed="${S.snippetLang === k}">${n}</button>`).join('')}</div>
+    <div class="code-block"><pre class="full">${esc(snippet(S.snippetLang, S.newKey?.key))}</pre><button class="btn ghost sm" data-act="copy" data-text="${esc(snippet(S.snippetLang, S.newKey?.key))}">${I('copy', 14)} Copy</button></div>
+    <div class="form-actions" style="margin-top:12px"><button class="btn sm" data-act="test-ask">${I('play', 14)} Send me a test request</button><span class="help" style="margin:0">Full format: <a href="https://github.com/nkomianos/doorman/blob/main/spec/ask-v0.1.md" target="_blank" rel="noreferrer">the Ask spec</a></span></div>
+  </section>`;
+  return html;
+}
+
 // ----------------------------------------------------------------- render
+
+const setupLeft = () => (S.loaded && S.config ? setupSteps().filter((x) => !x.done).length : 0);
 
 function renderNav() {
   const L = lists();
@@ -840,8 +1026,10 @@ function renderNav() {
     ${item('updates', 'bell', 'Updates', L.updates.length)}
     ${item('snoozed', 'clock', 'Snoozed', L.snoozed.length)}
     ${item('history', 'history', 'History')}
+    ${item('now', 'pulse', 'Now', S.now?.sessions?.filter((x) => x.status === 'working' || x.status === 'waiting').length || 0)}
     <div class="nav-sep"></div>
     <div class="nav-label">Manage</div>
+    ${item('connect', 'link', 'Connect', setupLeft(), true)}
     ${item('agents', 'bot', 'Agents')}
     ${item('rules', 'rules', 'Rules', S.suggestions.length, true)}
     ${item('activity', 'shield', 'Activity log')}
@@ -856,7 +1044,7 @@ function renderStatus() {
   const manual = st.source === 'manual';
   $('#status-dot').className = `dot ${st.mode}`;
   $('#status-mode').textContent = MODES[st.mode]?.label ?? st.mode;
-  const sub = st.until ? `until ${fmtWhen(st.until)}` : !manual && st.source && st.source !== 'default' ? `from ${st.source === 'quiet-hours' ? 'quiet hours' : st.source}` : manual ? '' : 'automatic';
+  const sub = st.until ? `until ${fmtWhen(st.until)}` : !manual && st.source && st.source !== 'default' ? `from ${st.source === 'quiet-hours' ? 'quiet hours' : st.source === 'activity' ? (st.note || 'activity') : st.source}` : manual ? '' : 'automatic';
   $('#status-sub').textContent = sub;
   $('#status-btn').title = `${MODES[st.mode]?.desc ?? ''}. Click to change (f)`;
   const menu = $('#status-menu');
@@ -869,7 +1057,7 @@ function renderStatus() {
       <div class="menu-sep"></div>
       ${Object.entries(MODES).map(([k, m]) => `<button class="menu-item" role="menuitemradio" aria-checked="${cur === k}" data-mode="${k}"><span class="dot ${k}"></span><b>${m.label}</b><span class="check">${cur === k ? I('check', 16) : ''}</span><small>${m.desc}</small></button>`).join('')}
       <div class="menu-sep"></div>
-      <button class="menu-item" role="menuitemradio" aria-checked="${cur === 'auto'}" data-mode="auto"><span>${I('clock', 16)}</span><b>Automatic</b><span class="check">${cur === 'auto' ? I('check', 16) : ''}</span><small>Follow your calendar and quiet hours${S.state?.calendar?.configured ? '' : ' (set them up in Settings)'}</small></button>`;
+      <button class="menu-item" role="menuitemradio" aria-checked="${cur === 'auto'}" data-mode="auto"><span>${I('clock', 16)}</span><b>Automatic</b><span class="check">${cur === 'auto' ? I('check', 16) : ''}</span><small>Follow your calendar, quiet hours and activity${S.state?.calendar?.configured || S.config?.config?.activity?.enabled ? '' : ' (set them up in Connect)'}</small></button>`;
   }
 }
 
@@ -905,6 +1093,8 @@ function render() {
     updates: viewUpdates,
     snoozed: viewSnoozed,
     history: viewHistory,
+    now: viewNow,
+    connect: viewConnect,
     agents: viewAgents,
     rules: viewRules,
     activity: viewActivity,
@@ -937,6 +1127,15 @@ function tick() {
   }
 }
 setInterval(tick, 1000);
+// The Now view follows your agents live; elsewhere a slow refresh keeps the nav count honest.
+setInterval(async () => {
+  if (document.hidden || !S.connected) return;
+  if (S.view === 'now' || Date.now() - (S.nowAt || 0) > 60000) {
+    S.nowAt = Date.now();
+    await loadNow().catch(() => {});
+    if (S.view === 'now' || S.view === 'inbox') scheduleRender(); else renderNav();
+  }
+}, 5000);
 setInterval(() => { if (!S.settingsDirty && !document.activeElement?.matches('input,textarea,select')) scheduleRender(); }, 30000); // refresh "5 min ago"
 
 // --------------------------------------------------------------- navigation
@@ -963,6 +1162,9 @@ async function go(view, selId = null, anchor = null) {
     if (view === 'rules') await loadRules();
     if (view === 'activity') await loadLedger();
     if (view === 'settings') await Promise.all([loadConfig(), loadState()]);
+    if (view === 'now') await loadNow();
+    if (view === 'connect') await Promise.all([loadConfig(), loadIntegrations(), loadKeys(), loadCalendar(), loadAgents()]);
+    if (view !== 'connect') S.newKey = null;
   } catch (err) { fail(err); }
   render();
   if (selId) document.getElementById(selId)?.scrollIntoView({ block: 'center' });
@@ -1072,6 +1274,8 @@ document.addEventListener('click', async (e) => {
       if (!S.testResult.sent.length && !Object.keys(S.testResult.errors || {}).length) S.testResult.errors = { all: 'desktop notifications are off and no phone is set up' };
       const box = $('#test-result');
       if (box) box.innerHTML = testBoxHtml();
+      else if (S.testResult.sent.length) toast(`Sent to ${S.testResult.sent.join(' and ')}`);
+      else fail(new Error(Object.values(S.testResult.errors).join('; ')));
     } catch (err) { fail(err); }
     b.disabled = false;
     return undefined;
@@ -1084,6 +1288,75 @@ document.addEventListener('click', async (e) => {
       return toast('Topic generated', { sub: 'Save, then subscribe to it in the ntfy app' });
     }
     case 'settings-discard': S.settingsDirty = false; await loadConfig().catch(fail); return render();
+    case 'integration': {
+      const on = b.dataset.on === '1';
+      const name = S.integrations.find((x) => x.id === id)?.name || id;
+      if (!on && !confirm(`Disconnect ${name}? Doorman removes only its own entries and keeps a backup.`)) return undefined;
+      b.disabled = true;
+      try {
+        const r = await api('POST', `/v1/integrations/${id}`, { connected: on });
+        await loadIntegrations(); render();
+        toast(on ? `${name} connected` : `${name} disconnected`, { sub: r.message, ms: 6000 });
+      } catch (err) { b.disabled = false; fail(err); }
+      return undefined;
+    }
+    case 'tg-save': {
+      const token = $('[data-tg-token]')?.value.trim();
+      if (!/^\d+:[\w-]{30,}$/.test(token || '')) return toast('That doesn’t look like a bot token. It looks like 123456789:AAE…', { error: true, ms: 6000 });
+      b.disabled = true;
+      try {
+        S.config = await api('PATCH', '/v1/config', { telegram: { token, mirror: 'always' } });
+        render();
+        if (S.config.telegram?.error) fail(new Error(S.config.telegram.error));
+      } catch (err) { b.disabled = false; fail(err); }
+      return undefined;
+    }
+    case 'tg-remove':
+      if (S.config?.telegram?.paired && !confirm('Disconnect Telegram? Doorman stops sending to your phone there.')) return undefined;
+      try { S.config = await api('PATCH', '/v1/config', { telegram: null }); render(); toast('Telegram disconnected'); } catch (err) { fail(err); }
+      return undefined;
+    case 'cal-provider': S.calProvider = b.dataset.key; return render();
+    case 'cal-test': {
+      const ics = ($('[data-cal-url]')?.value || '').trim();
+      if (!ics) return toast('Paste your calendar link first', { error: true });
+      S.calDraft = ics;
+      b.disabled = true;
+      b.textContent = 'Testing…';
+      try { const r = await api('POST', '/v1/calendar/preview', { ics }); S.calPreview = r; } catch (err) { S.calPreview = { error: err.message }; }
+      return render();
+    }
+    case 'cal-save':
+      try {
+        const cur = S.config?.config?.calendar || {};
+        S.config = await api('PATCH', '/v1/config', { calendar: { ics: S.calDraft, busyMode: cur.busyMode || 'focus', dndKeywords: cur.dndKeywords || ['focus time', 'deep work', 'do not disturb'] } });
+        S.calPreview = null;
+        await Promise.all([loadCalendar(), loadState()]); render();
+        toast('Calendar connected', { sub: 'Meetings now hold everything but urgent requests' });
+      } catch (err) { fail(err); }
+      return undefined;
+    case 'cal-remove':
+      if (!confirm('Disconnect your calendar?')) return undefined;
+      try { S.config = await api('PATCH', '/v1/config', { calendar: null }); S.calDraft = ''; await loadCalendar(); render(); toast('Calendar disconnected'); } catch (err) { fail(err); }
+      return undefined;
+    case 'key-create': {
+      const name = ($('[data-key-name]')?.value || '').trim();
+      if (!name) { $('[data-key-name]')?.focus(); return toast('Give the key a name first', { error: true }); }
+      try { S.newKey = await api('POST', '/v1/keys', { name }); await loadKeys(); render(); } catch (err) { fail(err); }
+      return undefined;
+    }
+    case 'key-revoke': {
+      const k = S.keys.find((x) => x.id === id);
+      if (!confirm(`Revoke the key “${k?.name}”? Anything using it stops working.`)) return undefined;
+      try { await api('DELETE', `/v1/keys/${id}`); if (S.newKey?.id === id) S.newKey = null; await loadKeys(); render(); toast('Key revoked'); } catch (err) { fail(err); }
+      return undefined;
+    }
+    case 'snippet-lang': S.snippetLang = b.dataset.key; return render();
+    case 'test-ask':
+      try {
+        await api('POST', '/v1/asks', { agent: { id: 'test-agent', name: 'Test agent' }, question: 'Is Doorman set up the way you want?', options: [{ id: 'yes', label: 'Yes', style: 'primary' }, { id: 'later', label: 'Not yet' }], urgency: 'high', detail: 'This is a test request from the Connect page.', default: 'later', deadline: '1h' });
+        toast('Test request sent', { sub: 'It should ping you and appear in your inbox', action: { label: 'Open', fn: () => go('inbox') } });
+      } catch (err) { fail(err); }
+      return undefined;
     default: return undefined;
   }
 });
@@ -1096,6 +1369,7 @@ document.addEventListener('input', (e) => {
     S.drafts.set(t.dataset.id, { ...d, values: { ...d.values, [t.dataset.field]: t.type === 'checkbox' ? t.checked : t.value } });
   }
   if (t.dataset.histSearch !== undefined) { S.histQuery = t.value; render(); }
+  if (t.dataset.calUrl !== undefined) { S.calDraft = t.value; S.calPreview = null; }
   if (t.closest('#settings') && !S.settingsDirty) { S.settingsDirty = true; render(); }
 });
 document.addEventListener('change', (e) => {
@@ -1103,6 +1377,22 @@ document.addEventListener('change', (e) => {
   if (t.dataset.always) S.drafts.set(t.dataset.always, { ...S.drafts.get(t.dataset.always), always: t.checked });
   if (t.closest('#settings') && !S.settingsDirty) { S.settingsDirty = true; render(); }
   if (t.name === 'then') $('[data-answer-field]')?.toggleAttribute('hidden', t.value !== 'answer');
+  if (t.dataset.tg) {
+    const cur = S.config?.config?.telegram || {};
+    const next = { mirror: cur.mirror, redact: cur.redact, [t.dataset.tg]: t.type === 'checkbox' ? t.checked : t.value };
+    api('PATCH', '/v1/config', { telegram: { token: '••••', ...next } }).then((c) => { S.config = c; toast('Saved'); }).catch(fail);
+  }
+  if (t.dataset.actCfg) {
+    const cur = { enabled: false, awayAfterMinutes: 10, meetings: true, editorFocus: false, ...(S.config?.config?.activity || {}) };
+    const k = t.dataset.actCfg;
+    cur[k] = t.type === 'checkbox' ? t.checked : Math.max(2, Math.min(120, Number(t.value) || 10));
+    api('PATCH', '/v1/config', { activity: cur }).then(async (c) => {
+      S.config = c;
+      render();
+      if (k === 'enabled') toast(cur.enabled ? 'Activity sensing is on' : 'Activity sensing is off', { sub: cur.enabled ? 'Only idle time and the front app’s name. Nothing leaves this computer.' : '' });
+      else toast('Saved');
+    }).catch(fail);
+  }
 });
 document.addEventListener('toggle', (e) => {
   const d = e.target.closest?.('[data-more]');
@@ -1137,6 +1427,7 @@ document.addEventListener('submit', async (e) => {
       digest: { times, onBreak: !!f.get('onbreak') },
       learnThreshold: Number(f.get('learn')) || 3,
       desktop: !!f.get('desktop'),
+      sessions: !!f.get('sessions'),
       ntfy: f.get('n_topic') ? { server: f.get('n_server') || 'https://ntfy.sh', topic: f.get('n_topic').trim(), token: f.get('n_token') || null, mirror: f.get('n_mirror'), redact: !!f.get('n_redact') } : null,
     };
     try {
@@ -1239,7 +1530,7 @@ function connect() {
     S.connected = true;
     $('#offline').hidden = true;
     try {
-      await Promise.all([loadAsks(), loadState(), loadRules(), loadStats(), loadAgents(), loadConfig()]);
+      await Promise.all([loadAsks(), loadState(), loadRules(), loadStats(), loadAgents(), loadConfig(), loadIntegrations(), loadKeys(), loadNow()]);
     } catch (err) { fail(err); }
     if (!S.loaded) for (const id of S.asks.keys()) S.seen.add(id);
     S.loaded = true;
@@ -1258,6 +1549,12 @@ function connect() {
   es.addEventListener('update', upsert);
   es.addEventListener('state', async () => { await loadState().catch(() => {}); scheduleRender(); });
   es.addEventListener('rules', async () => { await loadRules().catch(() => {}); scheduleRender(); });
+  es.addEventListener('config', async () => {
+    const wasPaired = !!S.config?.telegram?.paired;
+    await loadConfig().catch(() => {});
+    if (!wasPaired && S.config?.telegram?.paired) toast('Telegram connected', { sub: 'Doorman will message you there when an agent needs you', ms: 6000 });
+    scheduleRender();
+  });
   es.addEventListener('agents', () => refreshSoon());
   es.addEventListener('interrupt', (e) => {
     const n = JSON.parse(e.data);

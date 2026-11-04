@@ -101,7 +101,9 @@ The decision uses:
 
 ## HTTP binding
 
-The reference daemon listens on `127.0.0.1:7777`. Every `/v1` route except `/v1/health` needs `Authorization: Bearer <token>`; the token is in `~/.doorman/token`.
+The reference daemon listens on `127.0.0.1:7777`. Every `/v1` route except `/v1/health` needs `Authorization: Bearer <token>`. The owner token is in `~/.doorman/token`.
+
+Agents should use an **agent key** (`dk_…`, created in the inbox or with `POST /v1/keys`) instead. An agent key may only `POST /v1/asks`, read, wait for and `DELETE` its own asks, and `GET /v1/state`. Asks made with a key are always attributed to the key's agent id, whatever `agent` says, so one agent can't spend another's budget or trigger its rules.
 
 | Method & path | |
 |---|---|

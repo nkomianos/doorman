@@ -1,8 +1,21 @@
-// The human-state sensor. Computed locally from manual overrides, quiet hours
-// and your calendar. Agents only ever see the coarse result, never the inputs.
+// The human-state sensor. Computed locally from manual overrides, quiet hours,
+// your calendar and (opt-in) keyboard/mouse activity. Agents only ever see the coarse result, never the inputs.
 import { readFile } from 'node:fs/promises';
 import { parseIcs, expandEvents } from './ics.js';
 import { hhmmToMinutes, minutesOfDay } from './util.js';
+
+/** Read an ICS feed from a URL (webcal:// works too) or a file path. */
+export async function fetchIcs(src) {
+  const url = String(src).trim().replace(/^webcal:\/\//i, 'https://');
+  if (/^https?:\/\//i.test(url)) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`calendar link returned HTTP ${res.status}`);
+    const text = await res.text();
+    if (!text.includes('BEGIN:VCALENDAR')) throw new Error("that link didn't return a calendar (ICS) file");
+    return text;
+  }
+  return readFile(url, 'utf8');
+}
 
 export const MODES = {
   available: { threshold: 'normal', label: 'Available' },
@@ -19,6 +32,7 @@ export class HumanState {
     this.events = [];
     this.calendarError = null;
     this.calendarFetchedAt = null;
+    this.activity = null; // latest ActivitySensor snapshot, if sensing is on
   }
 
   setManual(mode, until = null, note = null) {
@@ -56,14 +70,29 @@ export class HumanState {
     return { mode, until: Math.max(...busy.map((e) => e.end)) };
   }
 
+  _activity(now) {
+    const cfg = this.config.activity;
+    const a = this.activity;
+    if (!cfg?.enabled || !a || now - a.at > 60000) return { away: null, busy: null };
+    const awayMs = (cfg.awayAfterMinutes ?? 10) * 60000;
+    const away = a.idle_ms >= awayMs ? { mode: 'away', until: null, note: `no keyboard or mouse for ${Math.round(a.idle_ms / 60000)} min` } : null;
+    let busy = null;
+    if (cfg.meetings !== false && a.category === 'meeting') busy = { mode: 'focus', until: null, note: `${a.app} is in front` };
+    else if (cfg.editorFocus && a.category === 'editor' && a.idle_ms < 120000) busy = { mode: 'focus', until: null, note: `working in ${a.app}` };
+    return { away, busy };
+  }
+
   /** Full state, for the owner (inbox UI). Still never includes event titles. */
   current(now = this.clock()) {
     if (this.manual && this.manual.until != null && this.manual.until <= now) this.manual = null;
     let s;
     if (this.manual) s = { mode: this.manual.mode, until: this.manual.until, source: 'manual', note: this.manual.note };
     else s = (() => {
+      const act = this._activity(now);
+      if (act.away) return { ...act.away, source: 'activity' };
       const c = this._calendar(now);
       if (c) return { ...c, source: 'calendar' };
+      if (act.busy) return { ...act.busy, source: 'activity' };
       const q = this._quietHours(now);
       if (q) return { ...q, source: 'quiet-hours' };
       return { mode: 'available', until: null, source: 'default' };
@@ -75,6 +104,7 @@ export class HumanState {
       interruptible_for: def.threshold,
       surfaces: s.mode === 'away' ? ['phone'] : ['desktop', 'phone'],
       next_busy: this.events.find((e) => e.busy && e.start > now)?.start ?? null,
+      activity: this.config.activity?.enabled && this.activity ? { app: this.activity.app, category: this.activity.category, idle_ms: this.activity.idle_ms, since: this.activity.since } : null,
     };
   }
 
@@ -91,9 +121,7 @@ export class HumanState {
       return;
     }
     try {
-      const text = /^https?:\/\//i.test(cal.ics)
-        ? await (await fetch(cal.ics, { signal: AbortSignal.timeout(15000) })).text()
-        : await readFile(cal.ics, 'utf8');
+      const text = await fetchIcs(cal.ics);
       const now = this.clock();
       this.events = expandEvents(parseIcs(text), now - 864e5, now + 2 * 864e5);
       this.calendarError = null;
@@ -101,6 +129,18 @@ export class HumanState {
     } catch (err) {
       this.calendarError = err.message;
     }
+  }
+
+  /** Upcoming busy blocks, for the owner's inbox only. */
+  upcoming(limit = 8, now = this.clock()) {
+    const cal = this.config.calendar || {};
+    const keywords = (cal.dndKeywords ?? ['focus time', 'deep work', 'do not disturb']).map((k) => k.toLowerCase());
+    return this.events.filter((e) => e.busy && e.end > now).slice(0, limit).map((e) => ({
+      start: e.start,
+      end: e.end,
+      summary: e.summary,
+      mode: keywords.some((k) => e.summary.toLowerCase().includes(k)) ? 'dnd' : MODES[cal.busyMode] ? cal.busyMode : 'focus',
+    }));
   }
 
   calendarStatus() {

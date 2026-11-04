@@ -33,7 +33,7 @@ async function nextOpenAsk(pred = () => true, timeoutMs = 8000) {
 
 before(async () => {
   const home = mkdtempSync(join(tmpdir(), 'doorman-e2e-'));
-  d = await startDaemon({ home, port: 0, overrides: { desktop: false, bundleWindowMs: 150, digest: { times: [], onBreak: true } }, log: () => {}, quiet: true, tickMs: 50 });
+  d = await startDaemon({ home, port: 0, overrides: { desktop: false, noProtocol: true, bundleWindowMs: 150, digest: { times: [], onBreak: true } }, log: () => {}, quiet: true, tickMs: 50 });
   c = new DoormanClient({ url: d.url, token: d.token, home });
   env = { ...process.env, DOORMAN_HOME: home, DOORMAN_URL: d.url, DOORMAN_TOKEN: d.token };
 });

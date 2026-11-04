@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { appendFileSync, existsSync, openSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DoormanClient } from '../src/client.js';
-import { VERSION, doormanHome, ensureHome, loadConfig, paths, readJSON } from '../src/config.js';
+import { VERSION, doormanHome, ensureHome, loadConfig, paths } from '../src/config.js';
 import { Ledger } from '../src/ledger.js';
 import { fmtDuration } from '../src/util.js';
 
 const BIN = fileURLToPath(import.meta.url);
-const SELF = `node "${BIN}"`;
 
 const HELP = `doorman ${VERSION}: the attention layer for your AI agents
 
@@ -35,7 +33,7 @@ Agents
                                            Route a server's elicitations + gate its tools
   doorman hook claude-code                 Claude Code hook (PermissionRequest, Notification, Stop)
   doorman hook codex '<json>'              Codex notify program
-  doorman setup <claude-code|codex|cursor> [--write]
+  doorman setup [claude-code|codex|cursor|claude-desktop] [--write|--remove]
   doorman demo [--speed 1]                 Three agents need you at once
 
 Env: DOORMAN_HOME (default ~/.doorman), DOORMAN_URL, DOORMAN_AGENT, DOORMAN_AGENT_NAME`;
@@ -230,41 +228,44 @@ async function cmdHook(args) {
   process.exitCode = 0;
 }
 
-function cmdSetup(args) {
+async function cmdSetup(args) {
+  const { listIntegrations, setIntegration } = await import('../src/integrations.js');
+  const opts = { hookWaitSeconds: loadConfig().hookWaitSeconds || 600 };
+  const all = listIntegrations(opts);
   const which = args._[0];
+  if (!which) {
+    console.log('Agents on this computer:\n');
+    for (const i of all) console.log(`  ${i.connected ? '●' : i.detected ? '○' : '·'} ${i.name.padEnd(15)} ${i.connected ? 'connected' : i.detected ? 'installed, not connected' : 'not found'}   doorman setup ${i.id} --write`);
+    console.log('\nOr open the inbox: Connect → one click per agent.');
+    return;
+  }
+  const i = all.find((x) => x.id === which);
+  if (!i) die(`usage: doorman setup <${all.map((x) => x.id).join('|')}> [--write | --remove]`);
+  if (args.flags.write || args.flags.remove) {
+    console.log(setIntegration(which, !args.flags.remove, opts).message);
+  } else {
+    console.log(`Add to ${i.file} (or run: doorman setup ${which} --write):\n`);
+    console.log(i.snippet);
+  }
   if (which === 'claude-code') {
-    const hook = (timeout) => [{ hooks: [{ type: 'command', command: `${SELF} hook claude-code`, timeout }] }];
-    const hooks = { PermissionRequest: hook((loadConfig().hookWaitSeconds || 600) + 60), Notification: hook(15), Stop: hook(15) };
-    if (args.flags.write) {
-      const file = join(homedir(), '.claude', 'settings.json');
-      const cur = readJSON(file, {});
-      if (existsSync(file)) copyFileSync(file, `${file}.bak`);
-      cur.hooks = cur.hooks || {};
-      for (const [ev, entries] of Object.entries(hooks)) {
-        const existing = (cur.hooks[ev] || []).filter((e) => !JSON.stringify(e).includes('hook claude-code'));
-        cur.hooks[ev] = [...existing, ...entries];
-      }
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, JSON.stringify(cur, null, 2));
-      console.log(`Added Doorman hooks to ${file} (backup: settings.json.bak).`);
-    } else {
-      console.log('1) Add these hooks to ~/.claude/settings.json (or run: doorman setup claude-code --write):\n');
-      console.log(JSON.stringify({ hooks }, null, 2));
-    }
-    console.log('\n2) Give Claude an ask_human tool (optional, lets it ask you questions mid-task):\n');
+    console.log('\nOptional: give Claude an ask_human tool for questions mid-task:\n');
     console.log(`   claude mcp add doorman -- node "${BIN}" mcp\n`);
-    console.log('3) Gate risky tools on any MCP server by wrapping it:\n');
+    console.log('Gate risky tools on any MCP server by wrapping it:\n');
     console.log(`   claude mcp add github -- node "${BIN}" proxy --name github --gate "create_*|delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github\n`);
-  } else if (which === 'codex') {
-    console.log('Add to ~/.codex/config.toml:\n');
-    console.log(`notify = ["node", ${JSON.stringify(BIN)}, "hook", "codex"]\n`);
-    console.log('[mcp_servers.doorman]');
-    console.log('command = "node"');
-    console.log(`args = [${JSON.stringify(BIN)}, "mcp"]`);
-  } else if (which === 'cursor') {
-    console.log('Add to ~/.cursor/mcp.json:\n');
-    console.log(JSON.stringify({ mcpServers: { doorman: { command: 'node', args: [BIN, 'mcp'] } } }, null, 2));
-  } else die('usage: doorman setup <claude-code|codex|cursor> [--write]');
+  }
+}
+
+/** doorman://answer?... from a Windows notification button. */
+async function cmdUrl(args) {
+  const { parseActionUrl } = await import('../src/winproto.js');
+  const action = parseActionUrl(args._[0] || '');
+  if (!action) return;
+  const c = new DoormanClient({ autostart: false });
+  try {
+    await c.request('POST', '/v1/actions/answer', { ...action, surface: 'desktop' });
+  } catch (err) {
+    appendFileSync(paths().log, `${new Date().toISOString()} notification button: ${err.message}\n`);
+  }
 }
 
 async function main() {
@@ -329,6 +330,7 @@ async function main() {
     }
     case 'hook': return cmdHook(args);
     case 'setup': return cmdSetup(args);
+    case 'url': return cmdUrl(args);
     case 'demo': {
       const { runDemo } = await import('../src/demo.js');
       return runDemo({ speed: Number(args.flags.speed) || 1 });

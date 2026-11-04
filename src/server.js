@@ -44,15 +44,27 @@ function hostOk(req) {
   return LOCAL_HOSTS.has(host);
 }
 
-function tokenOk(req, url, token) {
+/** Who is calling: the owner (inbox, CLI), an agent holding an agent key, or nobody. */
+function whoIs(req, url, token, keys) {
   const h = req.headers.authorization || '';
   const given = h.startsWith('Bearer ') ? h.slice(7) : url.searchParams.get('token') || '';
   const a = Buffer.from(given);
   const b = Buffer.from(token);
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (a.length === b.length && timingSafeEqual(a, b)) return { role: 'owner' };
+  const key = keys?.check(given);
+  return key ? { role: 'agent', key } : null;
 }
 
-export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown, startDemo }) {
+// What an agent key may do: ask, wait for and withdraw its own asks, read coarse state.
+const AGENT_ROUTES = [
+  ['GET', /^\/v1\/state$/],
+  ['POST', /^\/v1\/asks$/],
+  ['GET', /^\/v1\/asks\/[\w-]+$/],
+  ['GET', /^\/v1\/asks\/[\w-]+\/wait$/],
+  ['DELETE', /^\/v1\/asks\/[\w-]+$/],
+];
+
+export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown, startDemo, keys = null, extraRoutes = [] }) {
   const clients = new Set();
   const broadcast = (event, data) => {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -67,8 +79,15 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
   const heartbeat = setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25000);
   heartbeat.unref();
 
+  // Agents only see asks made with their own key; the owner sees everything.
+  const ownAsk = (q, id) => {
+    const ask = router.get(id);
+    if (!ask || (q.who.role === 'agent' && ask.key_id !== q.who.key.id)) throw httpError(404, `no ask ${id}`);
+    return ask;
+  };
+
   const routes = [
-    ['GET', /^\/v1\/state$/, (q) => (q.url.searchParams.get('detail') ? { ...router.state.current(), calendar: router.state.calendarStatus() } : router.state.coarse())],
+    ['GET', /^\/v1\/state$/, (q) => (q.url.searchParams.get('detail') && q.who.role === 'owner' ? { ...router.state.current(), calendar: router.state.calendarStatus() } : router.state.coarse())],
     ['POST', /^\/v1\/state$/, async (q) => {
       const b = await q.body();
       const until = b.for ? Date.now() + (parseDuration(b.for) ?? 0) : parseWhen(b.until);
@@ -77,7 +96,14 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
     }],
     ['POST', /^\/v1\/asks$/, async (q) => {
       const b = await q.body();
+      if (q.who.role === 'agent') {
+        // A key speaks for exactly one agent, so it can't borrow another agent's budget or rules.
+        const k = q.who.key;
+        const name = (typeof b.agent === 'object' && b.agent?.name) || k.name;
+        b.agent = { id: k.agent_id, name, instance: typeof b.agent === 'object' ? b.agent?.instance : undefined };
+      }
       const ask = router.submit(b);
+      if (q.who.role === 'agent') ask.key_id = q.who.key.id;
       const waitMs = Math.min(parseDuration(q.url.searchParams.get('wait')) ?? 0, MAX_WAIT_MS);
       if (waitMs > 0) await router.wait(ask.id, waitMs);
       return [201, { ...answerView(ask), ask }];
@@ -87,11 +113,11 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
       return { asks: router.list({ status: p.get('status') || 'open', kind: p.get('kind'), limit: Number(p.get('limit')) || 200 }), counts: router.counts() };
     }],
     ['GET', /^\/v1\/asks\/([\w-]+)$/, (q, id) => {
-      const ask = router.get(id);
-      if (!ask) throw httpError(404, `no ask ${id}`);
-      return { ...answerView(ask), ask };
+      const ask = ownAsk(q, id);
+      return q.who.role === 'owner' ? { ...answerView(ask), ask } : answerView(ask);
     }],
     ['GET', /^\/v1\/asks\/([\w-]+)\/wait$/, async (q, id) => {
+      ownAsk(q, id);
       const ms = Math.min(parseDuration(q.url.searchParams.get('timeout') || '25s') ?? 25000, MAX_WAIT_MS);
       const ask = await router.wait(id, ms);
       return answerView(ask);
@@ -109,7 +135,11 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
       return answerView(router.snooze(id, ms, { surface: b.surface || 'api' }));
     }],
     ['POST', /^\/v1\/asks\/([\w-]+)\/unsnooze$/, async (q, id) => answerView(router.unsnooze(id, { surface: (await q.body()).surface || 'api' }))],
-    ['DELETE', /^\/v1\/asks\/([\w-]+)$/, (q, id) => answerView(router.cancel(id, q.url.searchParams.get('reason')))],
+    ['DELETE', /^\/v1\/asks\/([\w-]+)$/, (q, id) => { ownAsk(q, id); return answerView(router.cancel(id, q.url.searchParams.get('reason'))); }],
+    ['GET', /^\/v1\/keys$/, () => ({ keys: keys?.list() ?? [] })],
+    ['POST', /^\/v1\/keys$/, async (q) => [201, keys.create(await q.body())]],
+    ['DELETE', /^\/v1\/keys\/([\w-]+)$/, (q, id) => keys.revoke(id)],
+    ...extraRoutes,
     ['POST', /^\/v1\/digest$/, () => ({ delivered: !!router.deliverDigest() })],
     ['GET', /^\/v1\/agents$/, () => ({ agents: router.budgets.list() })],
     ['POST', /^\/v1\/agents\/([^/]+)\/mute$/, async (q, id) => {
@@ -162,7 +192,11 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
         return res.end(await readFile(new URL(file, UI_DIR)));
       }
 
-      if (!tokenOk(req, url, token)) throw httpError(401, 'missing or bad token (see ~/.doorman/token)');
+      const who = whoIs(req, url, token, keys);
+      if (!who) throw httpError(401, 'missing or bad token (use ~/.doorman/token, or an agent key from the inbox)');
+      if (who.role === 'agent' && !AGENT_ROUTES.some(([m, re]) => m === req.method && re.test(url.pathname))) {
+        throw httpError(403, 'agent keys can only ask, wait for their own answers, and read your status');
+      }
 
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
@@ -176,7 +210,7 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
         if (req.method !== method) continue;
         const m = re.exec(url.pathname);
         if (!m) continue;
-        const out = await handler({ req, url, body: () => readBody(req) }, ...m.slice(1));
+        const out = await handler({ req, url, who, body: () => readBody(req) }, ...m.slice(1));
         return Array.isArray(out) ? send(res, out[0], out[1]) : send(res, 200, out);
       }
       throw httpError(404, `no route ${req.method} ${url.pathname}`);
@@ -186,6 +220,7 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
     }
   });
 
+  server.broadcast = broadcast;
   server.closeClients = () => {
     clearInterval(heartbeat);
     for (const res of clients) res.end();

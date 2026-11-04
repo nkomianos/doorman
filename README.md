@@ -1,93 +1,175 @@
-# doorman
+<div align="center">
 
-**The attention layer for your AI agents.** One local router, owned by you, that decides when any of your agents gets to interrupt you.
+<img src="ui/favicon.svg" width="72" height="72" alt="">
 
-```
- Claude Code ─┐                       ┌─▶ now, bundled into one ping
- Codex ───────┤                       ├─▶ held until your focus block ends
- MCP servers ─┼──▶  doorman router  ──┼─▶ saved for the 12:00 digest
- your scripts ┤   (budgets · state ·  ├─▶ answered by a rule you made
- any HTTP ────┘    rules · ledger)    └─▶ defaulted safely at the deadline
-```
+# Doorman
 
-On mobile, notifications ended up being the real interface. Agents repeat that, more extremely: you'll run dozens of them, and every one invents its own chat window, approval prompt and way of pinging you. Each tool on the market sits on the **sender's** side, serving one developer's agent. Doorman sits on the **receiver's** side: yours, across all of them, the way your spam filter is yours and not the sender's.
+**The attention layer for your AI agents.**<br>
+One inbox for every agent that needs you, and one router that decides when any of them gets to interrupt you.
 
-In the demo below, three agents produce 12 asks in a few seconds. Without Doorman that's 12 interruptions. With Doorman it's **one**: the two urgent ones, bundled. Three are answered by a rule Doorman learned from you, one waits for your next break, and six go to the digest.
+<p>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4f46e5"></a>
+  <img alt="Node 20+" src="https://img.shields.io/badge/node-%E2%89%A520-4f46e5">
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-15803d">
+  <img alt="2 dependencies" src="https://img.shields.io/badge/dependencies-2-6b6b74">
+  <a href="#contributing"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-15803d"></a>
+</p>
+
+<p>
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#how-it-decides">How it decides</a> ·
+  <a href="#connect-your-agents">Connect agents</a> ·
+  <a href="#on-your-phone">Phone</a> ·
+  <a href="spec/ask-v0.1.md">Ask spec</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/inbox-dark.png">
+  <img alt="The Doorman inbox: two urgent requests that pinged you, with deadline countdowns, consequences for each option and a line explaining why each one interrupted you" src="docs/images/inbox-light.png" width="900">
+</picture>
+
+</div>
+
+## Why
+
+You're going to run a lot of agents: one fixing tests, one doing email, one watching flight prices, one in your CI. Each of them has its own chat window, its own approval prompt and its own way of pinging you. Every tool on the market sits on the **sender's** side, serving one developer's agent.
+
+Doorman sits on the **receiver's** side. It's yours, across all of them, the way your spam filter is yours and not the sender's. Agents send a structured request to Doorman. Doorman puts it in your inbox right away, and only **interrupts** you when it's worth it.
+
+> In the built-in demo, three agents send 12 requests in a few seconds. Without Doorman that's 12 pings. With Doorman it's **one**, with the two urgent ones bundled together. The rest wait quietly, go to your digest, or get answered by a rule Doorman learned from you.
+
+## Features
+
+| | |
+|---|---|
+| **One inbox for every agent** | Claude Code, Codex, Cursor, Claude Desktop, any MCP server, scripts and plain HTTP all land in the same place. |
+| **Interrupts you only when it matters** | Your status (Available, Focus, Do not disturb, Away), deadlines, safe defaults, urgency and a per-agent ping budget decide when you get pinged. Every request says **why**. |
+| **Bundles and digests** | Requests that arrive together become one notification. Low-priority updates wait for your digest or your next break. |
+| **Learns your preferences** | Answer the same way three times and Doorman offers a rule. It spots patterns too: allow `git status`, `git diff` and `git log` and it offers one rule for `Bash:git *`. It never offers to automate anything irreversible. |
+| **Knows when you're busy** | Connect your calendar, and optionally let it notice when you step away or join a Zoom call. That reading stays on your computer: agents only ever see “Focus” or “Available”. |
+| **See what your agents are doing** | The **Now** page shows each Claude Code and Codex session (working, waiting for you, or done) by reading the logs they already write. No setup. |
+| **Answer from anywhere** | Desktop notifications with answer buttons, plus your phone through Telegram or ntfy. One tap answers; nothing on your computer is exposed to the internet. |
+| **Undo everything** | Answer, dismiss or snooze and the card leaves at once, with 5 seconds to undo before anything reaches the agent. |
+| **Tamper-evident log** | Every request, routing decision and answer (including what you were shown) goes into a hash-chained log you can verify. |
 
 ## Quick start
 
 ```bash
 git clone https://github.com/nkomianos/doorman && cd doorman
 npm install
-node bin/doorman.js start          # inbox at http://127.0.0.1:7777
-node bin/doorman.js demo           # in another terminal: three agents need you at once
+node bin/doorman.js start      # opens on http://127.0.0.1:7777
 ```
 
-Optionally `npm link` to get a global `doorman` command. Requires Node 20+. No database, no build step, no cloud account.
+Open **http://127.0.0.1:7777**. A first-run checklist walks you through four steps:
+
+1. **Run the demo** to see three sample agents compete for your attention.
+2. **Connect your agents** with one click each (Doorman backs up every config it edits).
+3. **Set up your phone** with Telegram or ntfy.
+4. **Tell Doorman when you're busy** with a calendar link or activity sensing.
+
+Requires Node 20+. No database, no build step, no account. Run `npm link` once if you want a global `doorman` command.
+
+<table>
+  <tr>
+    <td width="62%"><img alt="The Now page: your status plus live Claude Code and Codex sessions, marked working, needs you or done" src="docs/images/now.png"></td>
+    <td><img alt="The inbox on a phone" src="docs/images/mobile.png"></td>
+  </tr>
+  <tr>
+    <td><sub><b>Now:</b> your status and what every agent session is doing.</sub></td>
+    <td><sub><b>Mobile:</b> the inbox works on any screen.</sub></td>
+  </tr>
+</table>
 
 ## How it decides
 
-The router controls **interruptions, never visibility**. Every ask is in the inbox the moment it arrives; only the ping is scheduled. Every decision shows its reason ("Why: held, you're focused, waiting for a natural break").
+The router controls **interruptions, never visibility**. Every request is in your inbox the moment it arrives; only the ping is scheduled.
+
+```mermaid
+flowchart LR
+  A[Agent request] --> R{Your rules?}
+  R -- answers it --> Done[Settled for you]
+  R -- no --> S{Urgent enough<br>for your status?}
+  S -- no --> H[Held until your next break<br>or saved for the digest]
+  S -- yes --> B{Agent has<br>ping budget?}
+  B -- no --> H
+  B -- yes --> N[Bundled into one<br>notification]
+  H -. break, deadline, snooze ends .-> S
+```
 
 | Mechanism | What it does |
 |---|---|
-| **Your state** | `available` lets normal+ through, `focus` high+, `dnd` only critical, `away` sends high+ to your phone. Set it from the inbox or CLI, or let your calendar (ICS) and quiet hours set it. Computed locally; agents only see the coarse mode, never your events. |
-| **Bundling** | Asks arriving within a few seconds become one notification: "3 things need you (2 agents)". |
-| **Natural breaks** | When focus ends, everything held arrives together with the digest, as one notification. |
-| **Attention budgets** | Each agent may interrupt *n* times per hour. Acting on a ping grows its budget by 1; dismissing one halves it (AIMD, like TCP congestion control). Over budget, its asks wait. |
-| **Credibility** | Dismiss most of an agent's "urgent" asks and its urgency is lowered for it. Crying wolf stops working. |
-| **Deadlines & defaults** | An ask with a safe default can wait, and the default applies at the deadline. An ask with *no* safe default escalates shortly before its deadline. |
-| **Rules & learning** | "Always allow `Bash:npm test` from this project." Answer the same way three times and Doorman suggests the rule. Irreversible actions are never suggested. |
-| **Collapse keys** | A newer "build finished" replaces the unread older one, like mobile push collapse keys. |
-| **Ledger** | Every ask, routing decision and answer, including what you were shown, goes into a hash-chained, append-only log (`doorman ledger verify`). That's the human-oversight record compliance teams will need. |
+| **Your status** | `Available` lets normal and urgent requests through. `Focus` lets urgent ones through, `Do not disturb` only critical ones, and `Away` sends urgent ones to your phone. Set it yourself, or let your calendar, quiet hours and activity set it. |
+| **Natural breaks** | When a meeting or focus block ends, everything that waited arrives together, in one notification. |
+| **Ping budgets** | Each agent may interrupt *n* times per hour. Act on its pings and the budget grows; dismiss them and it halves, like TCP backing off under congestion. |
+| **Credibility** | Dismiss most of an agent's “urgent” requests and Doorman starts treating its urgent as normal. Crying wolf stops working. |
+| **Deadlines & safe defaults** | A request with a safe default can wait: the default applies at the deadline. A request with *no* safe default escalates shortly before its deadline. |
+| **Snooze** | Snooze a request for 5 minutes or until tomorrow. When it comes back it pings you, even if the agent is out of budget. |
+| **Collapse keys** | A newer “build finished” replaces the unread older one, like mobile push. |
 
 ## Connect your agents
 
-### Claude Code
+The **Connect** page detects what's installed and wires it up with one click. Prefer the terminal? Use these:
 
 ```bash
-doorman setup claude-code           # prints the hooks; add --write to merge into ~/.claude/settings.json
+doorman setup                       # what's installed and connected
+doorman setup claude-code --write   # or: codex, cursor, claude-desktop  (--remove to undo)
 ```
 
-- **PermissionRequest** → Allow/Deny lands in your inbox (and phone). Your answer goes back to Claude Code. If nobody answers in time, Claude Code falls back to its normal prompt.
-- **Stop** → "Finished in api: …" FYIs, one per session (collapsed).
-- **Notification** → other "needs you" moments.
-- Optionally `claude mcp add doorman -- node /path/to/bin/doorman.js mcp` gives Claude an `ask_human` tool for mid-task questions.
+<img alt="The Connect page: Claude Code connected, Codex, Cursor and Claude Desktop ready to connect with one click, and phone setup" src="docs/images/connect.png" width="900">
+
+<details>
+<summary><b>Claude Code</b>: permission prompts become one-tap decisions</summary>
+
+- **PermissionRequest**: Allow/Deny goes to your inbox and phone, and your answer goes back to Claude Code. If nobody answers in time, Claude Code shows its normal prompt.
+- **Stop**: “Finished in api: …” updates, one per session.
+- **Notification**: other “needs you” moments.
+- Optional: `claude mcp add doorman -- node /path/to/bin/doorman.js mcp` gives Claude an `ask_human` tool for questions mid-task.
 
 Each project gets its own budget and rules (`claude-code-<project>`).
+</details>
 
-### Any MCP client (Claude Code, Cursor, Codex, …)
+<details>
+<summary><b>Codex, Cursor, Claude Desktop and any MCP client</b></summary>
 
 `doorman mcp` is an MCP server with four tools:
 
 | Tool | |
 |---|---|
-| `ask_human` | question, options with consequences, urgency, deadline, safe default, reversibility, delay cost, context. Waits up to `wait_seconds`, then returns a pending id. |
+| `ask_human` | A question, options with consequences, urgency, deadline, safe default, reversibility and context. Waits up to `wait_seconds`, then returns a pending id. |
 | `check_answer` | Pick up an answer later. |
-| `notify_human` | FYI. Batched into digests unless urgent, so agents can use it freely. |
-| `get_human_state` | `available` / `focus` / `dnd` / `away` plus the minimum urgency that may interrupt. |
+| `notify_human` | An update. Goes to the digest unless urgent, so agents can use it freely. |
+| `get_human_state` | `available` / `focus` / `dnd` / `away` and the minimum urgency that may interrupt. |
 
-### Wrap any MCP server: zero changes on either side
+For Codex, `doorman setup codex --write` also adds turn-complete updates.
+</details>
+
+<details>
+<summary><b>Wrap any MCP server</b>: approve risky tools, with no changes on either side</summary>
 
 ```bash
 doorman proxy --name github --gate "create_*|delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github
 ```
 
 The proxy passes everything through, except that:
-- tool calls matching `--gate` wait for your Allow/Deny (default: deny after 10 minutes);
-- the server's **elicitation** requests (MCP's "ask the user") are routed to Doorman instead of the client's UI. Booleans and enums become one-tap decisions; other schemas become a form.
+- tool calls matching `--gate` wait for your Allow/Deny (deny after 10 minutes);
+- the server's **elicitation** requests (MCP's “ask the user”) come to Doorman instead. Yes/no and choice questions become one-tap decisions; anything else becomes a form.
+</details>
 
-### Codex
+<details>
+<summary><b>Scripts and other agents</b>: one HTTP call, with their own key</summary>
+
+Create an **agent key** on the Connect page. A key can send requests and read your status, nothing else: it can't answer, read your inbox, or pretend to be another agent.
 
 ```bash
-doorman setup codex                 # notify = [...] for turn-complete FYIs, plus the MCP server
+curl -s "http://127.0.0.1:7777/v1/asks?wait=25s" \
+  -H "Authorization: Bearer $DOORMAN_KEY" -H "content-type: application/json" \
+  -d '{"question":"Backup is 3x larger than usual. Upload anyway?","options":["Upload","Skip"],"default":"Skip","deadline":"30m"}'
 ```
 
-### Anything else: one HTTP call or one shell command
-
 ```bash
-doorman ask "Backup is 3x larger than usual. Upload anyway?" -o Upload -o Skip --default Skip --deadline 30m
-# prints "Upload" / "Skip"; exit 0 answered, 1 dismissed, 2 expired
+doorman ask "Deploy v2 to production?" -o Deploy -o Wait --default Wait --deadline 30m
+# prints the answer; exit 0 answered, 1 dismissed, 2 expired
 ```
 
 ```js
@@ -95,70 +177,117 @@ import { askHuman } from 'doorman-attention/client';
 const r = await askHuman({ question: 'Pay the €1,240 invoice?', options: ['Pay now', 'Hold'], default: 'Hold', deadline: '2h', reversible: false });
 ```
 
-See [`examples/`](examples) and the [Ask spec](spec/ask-v0.1.md).
+More in [`examples/`](examples) and the [Ask spec](spec/ask-v0.1.md).
+</details>
 
-## Your phone
+## On your phone
 
-Settings → Phone. Doorman pushes through [ntfy](https://ntfy.sh) (hosted or self-hosted) with one-tap answer buttons. Answers come back through a **reply topic** the daemon subscribes to, signed with HMAC, so it works from anywhere without exposing your machine to the internet. Turn on "Hide question text" if you don't want question content on a third-party server.
+Doorman is local-first, so there's no Doorman cloud. Instead it uses free apps you may already have, through **outgoing connections only**: nothing on your computer is reachable from the internet.
 
-## The inbox
+| | How it works | Setup |
+|---|---|---|
+| **Telegram** (recommended) | Your own private bot sends each request with answer buttons. Reply to a message to answer a question; `/status`, `/inbox`, `/focus 1h` and `/away` work too. Messages update once a request is settled anywhere. Only the chat you paired can answer. | About a minute: create a bot with @BotFather, paste the token on the Connect page, tap Start. |
+| **ntfy** | An open-source push app with action buttons. Answers come back over a signed reply topic. | Subscribe to the secret topic Doorman generates. |
 
-`http://127.0.0.1:7777`. A fresh install opens on a welcome screen with a **Run the demo** button.
+Both can hide the question text on your lock screen, and can push every ping or only when you're Away.
 
-- **Needs you**: decisions, split into "Pinged you" and "Didn't ping you", each with a deadline countdown and a plain-language line saying why it was or wasn't routed to you.
-- **Answer, dismiss or mark read** and the card leaves at once, with **Undo** for 5 seconds before anything is sent to the agent.
-- **Snooze** (5 min to tomorrow morning; times past the deadline are blocked) moves a request to **Snoozed**. When the snooze ends, it comes back and pings you, without using the agent's budget.
-- **Status menu** (top right): Available, Focus, Do not disturb, Away or Automatic, each for 30 min to 4 hours or until you change it.
-- **Updates**, **History** (filters and search), **Agents** (ping budget, credibility, mute), **Rules** (suggestions, plain-English rules, undo delete), **Activity log** (verify the chain), **Settings** (desktop and phone notifications with a test button and troubleshooting, schedule, delivery, copy-paste agent setup).
+On **Windows**, desktop notifications have answer buttons too. Doorman registers its own notification sender and a `doorman://` link handler for your user account (no admin needed). Every button is signed, so a link on a web page can't answer for you.
 
-Keyboard: `j`/`k` move · `1`–`9` choose · `s` snooze · `d` dismiss · `e` more context · `a` always · `z` undo · `f` status · `g` then `i`/`u`/`s`/`h` to switch views · `?` all shortcuts.
+## Privacy and security
 
-On Windows, Doorman registers itself as a notification sender (per-user, no admin), so it shows up as **Doorman** under Settings → System → Notifications. If you don't see pop-ups, check that Windows' Do not disturb is off.
+- **Local only.** The daemon listens on `127.0.0.1`, with a Host-header check against DNS rebinding. Your inbox, rules and history live in `~/.doorman`.
+- **Agents see almost nothing.** They get your status (`available`, `focus`, `dnd`, `away`) and nothing about your calendar, your apps or other agents.
+- **Activity sensing is opt-in** and reads two things: time since your last input, and the *name* of the app in front. Never window titles, keystrokes or screenshots. It's kept in memory, never logged.
+- **Session view** only reads the tail of Claude Code and Codex logs on your computer. You can turn it off in Settings.
+- **Tokens and keys.** The owner token is in `~/.doorman/token` (mode 600). Agent keys are stored hashed and can be revoked any time.
+- **Signed one-tap answers.** Phone and desktop buttons carry an HMAC per request and option; forged answers are rejected.
+- **Hash-chained log.** `doorman ledger verify` detects edits and deletions.
+- **You are the customer.** There is no way for an agent to buy priority.
 
 ## The Ask format
 
-The part meant to outlive this implementation. One question; options and their consequences; what happens if you don't answer, and by when; reversibility; what delay costs; detail at three zoom levels; who's asking. Structured, so one ask renders on a lock screen, a watch, in a voice prompt or a digest. [Read the spec →](spec/ask-v0.1.md)
+The part meant to outlive this implementation: **one question**, options and their consequences, what happens if you don't answer and by when, whether the action is reversible, what waiting costs, detail at three zoom levels, and who's asking. Structured, so the same request works on a lock screen, a watch, a voice prompt or a digest.
 
-## Security model
+```json
+{
+  "question": "Lisbon flight dropped to €212 (was €298). Book it?",
+  "options": [
+    { "id": "book", "label": "Book", "consequence": "Charges your saved card €212" },
+    { "id": "skip", "label": "Skip", "consequence": "Keep watching the price" }
+  ],
+  "urgency": "high", "deadline": "20m", "default": "skip", "reversible": false,
+  "delay_cost": "Fare usually rebounds within the hour"
+}
+```
 
-- Binds to `127.0.0.1` only, with a Host-header check against DNS rebinding.
-- Every API call needs the bearer token in `~/.doorman/token` (created with mode 600).
-- The human-state signal is computed on your machine. Agents get `{mode, label, interruptible_for, until}`, nothing else.
-- Phone answers are HMAC-signed per ask and option; forged replies are ignored.
-- The ledger is hash-chained; `doorman ledger verify` detects edits and deletions.
-- The user is the customer: there is no way for an agent to buy priority.
+[Read the spec →](spec/ask-v0.1.md)
+
+## Rules that learn
+
+<img alt="A rule suggestion: you answered Allow the last 3 times, make it a rule?" src="docs/images/rules.png" width="900">
+
+- **Exact repeats**: the same answer to the same request three times → “Always answer Allow to `Bash:npm test`?”
+- **Patterns**: the same answer to three *different* requests with a common prefix → one rule for the prefix. Never if you ever answered differently.
+- **Noise**: keep marking an agent's updates “not useful” and Doorman offers to send them to your digest instead.
+- **Your call, always**: suggestions are never applied on their own, irreversible actions are never suggested, and every automatic answer in History has a **Stop answering this for me** button.
 
 ## CLI
 
 ```
 doorman start [--port 7777] [--detach]    doorman focus <available|focus|dnd|away|auto> [--for 90m]
 doorman stop | status | open              doorman digest
-doorman ask "…" -o A -o B [...]           doorman rules [list | add … | rm <id>]
-doorman notify "…" [--urgency low]        doorman ledger [tail | verify | export]
-doorman mcp                               doorman setup <claude-code|codex|cursor> [--write]
-doorman proxy [--gate …] -- <cmd…>        doorman demo [--speed 2]
-doorman hook <claude-code|codex>
+doorman setup [agent] [--write|--remove]  doorman rules [list | add … | rm <id>]
+doorman ask "…" -o A -o B [...]           doorman ledger [tail | verify | export]
+doorman notify "…" [--urgency low]        doorman demo [--speed 2]
+doorman mcp                               doorman hook <claude-code|codex>
+doorman proxy [--gate …] -- <cmd…>
 ```
 
-State lives in `~/.doorman` (`DOORMAN_HOME` to change): `config.json`, `rules.json` (hand-editable), `state.json`, `ledger.jsonl`, `token`.
+State lives in `~/.doorman` (set `DOORMAN_HOME` to change it): `config.json`, `rules.json` (hand-editable), `state.json`, `keys.json`, `ledger.jsonl`, `token`.
 
-## Development
+## FAQ
 
-```bash
-npm test      # unit tests for the router (fake clock), calendar, ledger and spec, plus end-to-end:
-              # HTTP API, Claude Code hook, MCP server, MCP proxy, ntfy round-trip
-```
+<details>
+<summary><b>Is this a desktop app?</b></summary>
 
-Plain ESM JavaScript, two dependencies (`@modelcontextprotocol/sdk`, `zod`). `src/router.js` is the core; everything else is intake (hooks, MCP, proxy, HTTP) or surfaces (inbox, desktop, phone).
+It's a small background program with a web inbox at `http://127.0.0.1:7777`, plus native desktop notifications. It runs the same on Windows, macOS and Linux.
+</details>
+
+<details>
+<summary><b>I don't see desktop notifications.</b></summary>
+
+Use **Settings → Send a test notification**. On Windows, look for **Doorman** under Settings → System → Notifications and check that Do not disturb is off; Windows files notifications silently while it's on. On macOS, allow notifications for your terminal app.
+</details>
+
+<details>
+<summary><b>Can agents in the cloud reach it?</b></summary>
+
+Not yet. Doorman only listens on your own computer. Cloud agents and a hosted relay are on the roadmap.
+</details>
+
+<details>
+<summary><b>What if Doorman isn't running?</b></summary>
+
+Hooks fail open: Claude Code falls back to its normal prompt. The SDK and `doorman ask` start the daemon automatically if needed.
+</details>
 
 ## Roadmap
 
-- Watch and voice surfaces (the Ask format already carries a one-line form)
-- Smarter natural-break detection: idle time, app focus, typing cadence (local only)
-- Cross-agent merging of related asks (same trip, same PR) via `thread`
-- Team mode: approval policies, escalation paths, audit export
-- Native OS focus-mode integration (macOS Focus, Windows Focus assist)
+- Native menu-bar / tray app and a mobile app (the Ask format already carries a one-line form)
+- Cloud agents (Devin, Cursor background agents, GitHub Copilot) and an optional encrypted relay
+- Cross-agent grouping of related requests (same trip, same PR) via `thread`
+- OS focus-mode integration (macOS Focus, Windows Focus sessions)
+- Team mode: approval policies, escalation paths and audit export
+
+## Contributing
+
+```bash
+npm test      # router (fake clock), calendar, ledger, spec, learning, integrations, Telegram,
+              # plus end to end: HTTP API, agent keys, Claude Code hook, MCP server, MCP proxy, ntfy
+```
+
+Plain ESM JavaScript, no build step, two dependencies (`@modelcontextprotocol/sdk`, `zod`). `src/router.js` is the core; everything else is intake (hooks, MCP, proxy, HTTP) or surfaces (inbox, desktop, phone). Issues and pull requests are welcome.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)
