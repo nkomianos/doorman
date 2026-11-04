@@ -72,7 +72,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   startNtfy();
 
   const baseUrl = () => `http://127.0.0.1:${config.port}`;
-  const iconPath = join(p.home, 'doorman.png');
+  const iconPath = join(p.home, 'doorman-icon-2.png'); // bump the name when the icon design changes
   router.on('interrupt', (n) => {
     const c = compose(n, baseUrl());
     n.composed = { title: c.title, body: c.body };
