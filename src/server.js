@@ -1,0 +1,190 @@
+// HTTP API + live event stream + the inbox UI. Binds to loopback only.
+import { createServer as createHttpServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { timingSafeEqual } from 'node:crypto';
+import { answerView } from './spec.js';
+import { parseDuration, parseWhen } from './util.js';
+
+const UI_DIR = new URL('../ui/', import.meta.url);
+const STATIC = {
+  '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+};
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+const MAX_BODY = 1 << 20;
+const MAX_WAIT_MS = 60000;
+
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+function send(res, status, data) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(body);
+}
+
+async function readBody(req) {
+  let size = 0;
+  const chunks = [];
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY) throw httpError(413, 'body too large');
+    chunks.push(c);
+  }
+  if (!size) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw httpError(400, 'body is not valid JSON');
+  }
+}
+
+function hostOk(req) {
+  const host = (req.headers.host || '').replace(/:\d+$/, '');
+  return LOCAL_HOSTS.has(host);
+}
+
+function tokenOk(req, url, token) {
+  const h = req.headers.authorization || '';
+  const given = h.startsWith('Bearer ') ? h.slice(7) : url.searchParams.get('token') || '';
+  const a = Buffer.from(given);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown }) {
+  const clients = new Set();
+  const broadcast = (event, data) => {
+    const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of clients) res.write(msg);
+  };
+  router.on('ask', (a) => broadcast('ask', a));
+  router.on('update', (a) => broadcast('update', a));
+  router.on('state', (s) => broadcast('state', s));
+  router.on('rules', () => broadcast('rules', {}));
+  router.on('agents', () => broadcast('agents', {}));
+  router.on('interrupt', (n) => broadcast('interrupt', { id: n.id, kind: n.kind, asks: n.asks.map((a) => a.id), digest: n.digest.map((a) => a.id), composed: n.composed }));
+  const heartbeat = setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25000);
+  heartbeat.unref();
+
+  const routes = [
+    ['GET', /^\/v1\/state$/, (q) => (q.url.searchParams.get('detail') ? { ...router.state.current(), calendar: router.state.calendarStatus() } : router.state.coarse())],
+    ['POST', /^\/v1\/state$/, async (q) => {
+      const b = await q.body();
+      const until = b.for ? Date.now() + (parseDuration(b.for) ?? 0) : parseWhen(b.until);
+      router.setState(b.mode, until || null, b.note || null);
+      return { ...router.state.current(), calendar: router.state.calendarStatus() };
+    }],
+    ['POST', /^\/v1\/asks$/, async (q) => {
+      const b = await q.body();
+      const ask = router.submit(b);
+      const waitMs = Math.min(parseDuration(q.url.searchParams.get('wait')) ?? 0, MAX_WAIT_MS);
+      if (waitMs > 0) await router.wait(ask.id, waitMs);
+      return [201, { ...answerView(ask), ask }];
+    }],
+    ['GET', /^\/v1\/asks$/, (q) => {
+      const p = q.url.searchParams;
+      return { asks: router.list({ status: p.get('status') || 'open', kind: p.get('kind'), limit: Number(p.get('limit')) || 200 }), counts: router.counts() };
+    }],
+    ['GET', /^\/v1\/asks\/([\w-]+)$/, (q, id) => {
+      const ask = router.get(id);
+      if (!ask) throw httpError(404, `no ask ${id}`);
+      return { ...answerView(ask), ask };
+    }],
+    ['GET', /^\/v1\/asks\/([\w-]+)\/wait$/, async (q, id) => {
+      const ms = Math.min(parseDuration(q.url.searchParams.get('timeout') || '25s') ?? 25000, MAX_WAIT_MS);
+      const ask = await router.wait(id, ms);
+      return answerView(ask);
+    }],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/answer$/, async (q, id) => {
+      const b = await q.body();
+      return answerView(router.answer(id, { option: b.option, text: b.text, values: b.values, always: !!b.always, surface: b.surface || 'api' }));
+    }],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/dismiss$/, async (q, id) => answerView(router.dismiss(id, { surface: (await q.body()).surface || 'api' }))],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/ack$/, async (q, id) => answerView(router.ack(id, { surface: (await q.body()).surface || 'api' }))],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/snooze$/, async (q, id) => {
+      const b = await q.body();
+      const ms = parseDuration(b.for || '1h');
+      if (!ms) throw httpError(400, 'for must be a duration like "30m"');
+      return answerView(router.snooze(id, ms, { surface: b.surface || 'api' }));
+    }],
+    ['DELETE', /^\/v1\/asks\/([\w-]+)$/, (q, id) => answerView(router.cancel(id, q.url.searchParams.get('reason')))],
+    ['POST', /^\/v1\/digest$/, () => ({ delivered: !!router.deliverDigest() })],
+    ['GET', /^\/v1\/agents$/, () => ({ agents: router.budgets.list() })],
+    ['POST', /^\/v1\/agents\/([^/]+)\/mute$/, async (q, id) => {
+      const b = await q.body();
+      router.setMuted(decodeURIComponent(id), b.muted !== false);
+      return router.budgets.view(decodeURIComponent(id));
+    }],
+    ['POST', /^\/v1\/agents\/([^/]+)\/reset$/, (q, id) => {
+      router.budgets.reset(decodeURIComponent(id));
+      router.emit('agents');
+      return router.budgets.view(decodeURIComponent(id));
+    }],
+    ['GET', /^\/v1\/rules$/, () => ({ rules: router.rules.list, suggestions: [...router.suggestions.values()] })],
+    ['POST', /^\/v1\/rules$/, async (q) => [201, router.addRule(await q.body(), 'user')]],
+    ['DELETE', /^\/v1\/rules\/([\w-]+)$/, (q, id) => router.removeRule(id)],
+    ['POST', /^\/v1\/suggestions\/([\w-]+)\/accept$/, (q, id) => router.acceptSuggestion(id)],
+    ['POST', /^\/v1\/suggestions\/([\w-]+)\/decline$/, (q, id) => router.declineSuggestion(id)],
+    ['GET', /^\/v1\/ledger$/, (q) => ({ entries: router.ledger.tail(Number(q.url.searchParams.get('limit')) || 100, q.url.searchParams.get('type')) })],
+    ['GET', /^\/v1\/ledger\/verify$/, () => router.ledger.verify()],
+    ['GET', /^\/v1\/stats$/, () => ({ stats: router.stats, counts: router.counts() })],
+    ['GET', /^\/v1\/config$/, () => getConfig()],
+    ['PATCH', /^\/v1\/config$/, async (q) => updateConfig(await q.body())],
+    ['POST', /^\/v1\/notify-test$/, async () => notifyTest()],
+    ['POST', /^\/v1\/shutdown$/, () => {
+      setTimeout(onShutdown, 50);
+      return { ok: true };
+    }],
+  ];
+
+  const server = createHttpServer(async (req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    try {
+      // DNS-rebinding guard: only answer requests addressed to loopback names.
+      if (!hostOk(req)) throw httpError(421, 'doorman only answers on localhost');
+
+      if (req.method === 'GET' && url.pathname === '/v1/health') return send(res, 200, { ok: true, name: 'doorman', version });
+
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+        const html = (await readFile(new URL('index.html', UI_DIR), 'utf8')).replace('__DOORMAN_TOKEN__', token).replace('__DOORMAN_VERSION__', version);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
+        return res.end(html);
+      }
+      if (req.method === 'GET' && STATIC[url.pathname]) {
+        const [file, type] = STATIC[url.pathname];
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' });
+        return res.end(await readFile(new URL(file, UI_DIR)));
+      }
+
+      if (!tokenOk(req, url, token)) throw httpError(401, 'missing or bad token (see ~/.doorman/token)');
+
+      if (req.method === 'GET' && url.pathname === '/v1/events') {
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+        res.write(`event: hello\ndata: ${JSON.stringify({ version })}\n\n`);
+        clients.add(res);
+        req.on('close', () => clients.delete(res));
+        return;
+      }
+
+      for (const [method, re, handler] of routes) {
+        if (req.method !== method) continue;
+        const m = re.exec(url.pathname);
+        if (!m) continue;
+        const out = await handler({ req, url, body: () => readBody(req) }, ...m.slice(1));
+        return Array.isArray(out) ? send(res, out[0], out[1]) : send(res, 200, out);
+      }
+      throw httpError(404, `no route ${req.method} ${url.pathname}`);
+    } catch (err) {
+      const status = err.status || 500;
+      send(res, status, { error: err.message, ...(err.errors ? { errors: err.errors } : {}) });
+    }
+  });
+
+  server.closeClients = () => {
+    clearInterval(heartbeat);
+    for (const res of clients) res.end();
+    clients.clear();
+  };
+  return server;
+}

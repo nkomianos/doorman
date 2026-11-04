@@ -1,0 +1,42 @@
+{
+  "name": "doorman-attention",
+  "version": "0.1.0",
+  "description": "The receiver-side attention layer for AI agents. One local router that decides when your agents get to interrupt you.",
+  "type": "module",
+  "bin": {
+    "doorman": "bin/doorman.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "ui",
+    "spec"
+  ],
+  "scripts": {
+    "start": "node bin/doorman.js start",
+    "demo": "node bin/doorman.js demo",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "mcp",
+    "human-in-the-loop",
+    "attention",
+    "notifications",
+    "approvals",
+    "claude-code"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}

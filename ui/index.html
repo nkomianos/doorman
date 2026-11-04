@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="doorman-token" content="__DOORMAN_TOKEN__">
+  <meta name="doorman-version" content="__DOORMAN_VERSION__">
+  <title>Doorman</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="chrome">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 21V4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 21h18" stroke="currentColor" stroke-width="1.8"/><circle cx="14.5" cy="12.5" r="1.2" fill="currentColor"/></svg>
+      <span>doorman</span>
+    </div>
+    <div class="state" id="state">
+      <div class="seg" role="radiogroup" aria-label="Your state">
+        <button data-mode="available" role="radio">Available</button>
+        <button data-mode="focus" role="radio">Focus</button>
+        <button data-mode="dnd" role="radio">DND</button>
+        <button data-mode="away" role="radio">Away</button>
+        <button data-mode="auto" role="radio" title="Follow calendar and quiet hours">Auto</button>
+      </div>
+      <select id="state-for" aria-label="For how long">
+        <option value="">until I change it</option>
+        <option value="30m">for 30 min</option>
+        <option value="1h">for 1 hour</option>
+        <option value="2h">for 2 hours</option>
+        <option value="4h">for 4 hours</option>
+      </select>
+      <div class="state-label" id="state-label"></div>
+    </div>
+    <div class="conn" id="conn" title="Live connection"></div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="inbox" class="on">Needs you <b id="c-inbox"></b></button>
+    <button data-tab="fyi">FYI <b id="c-fyi"></b></button>
+    <button data-tab="history">History</button>
+    <button data-tab="agents">Agents</button>
+    <button data-tab="rules">Rules <b id="c-rules"></b></button>
+    <button data-tab="ledger">Ledger</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  </div>
+
+  <main id="main" tabindex="-1"></main>
+
+  <footer class="foot">
+    <span id="stats"></span>
+    <span class="keys"><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>1</kbd>–<kbd>9</kbd> choose · <kbd>e</kbd> expand · <kbd>a</kbd> always · <kbd>s</kbd> snooze · <kbd>d</kbd> dismiss</span>
+  </footer>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+// `doorman mcp`: an MCP server any agent can add to reach you through Doorman.
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import { DoormanClient } from './client.js';
+import { VERSION } from './config.js';
+import { slug } from './util.js';
+
+const text = (obj) => ({ content: [{ type: 'text', text: typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2) }] });
+
+function describe(view) {
+  if (!view.final) return { ...view, note: `Still waiting for the human. Call check_answer with id "${view.id}" later; keep working on anything that doesn't depend on it.` };
+  if (view.status === 'expired') return { ...view, note: 'Deadline passed with no answer and no default. Do not proceed with the action.' };
+  if (view.status === 'dismissed' && !view.answer?.option) return { ...view, note: 'The human dismissed this. Treat it as "no" and do not ask again right away.' };
+  return view;
+}
+
+export async function runMcpServer({ client } = {}) {
+  const server = new McpServer({ name: 'doorman', version: VERSION });
+  const c = client || new DoormanClient();
+  const agent = () => {
+    if (c.agent) return c.agent;
+    const info = server.server.getClientVersion();
+    const name = info?.name || 'mcp-agent';
+    return { id: slug(name), name };
+  };
+
+  server.registerTool('ask_human', {
+    title: 'Ask the human',
+    description:
+      'Ask your human a question through Doorman, their attention router. Use this instead of stopping to ask in chat when you need a decision, approval or a piece of information. ' +
+      'Doorman decides when to interrupt them (now, at a natural break, or in a digest) based on urgency and their focus state, so: write one short question answerable with one tap; ' +
+      'give 2-4 options with their consequences; set a deadline and a safe default whenever one exists (then they are not interrupted unnecessarily); be honest about urgency. ' +
+      'Returns the answer, or a pending id to check later with check_answer.',
+    inputSchema: {
+      question: z.string().describe('One question, answerable in a tap or a word. Max ~140 chars.'),
+      options: z.array(z.union([z.string(), z.object({ label: z.string(), consequence: z.string().optional(), style: z.enum(['default', 'primary', 'danger']).optional() })])).optional()
+        .describe('2-4 choices. Omit for a free-text answer.'),
+      urgency: z.enum(['low', 'normal', 'high', 'critical']).optional().describe('critical = harm or loss within minutes. Over-claiming urgency lowers your credibility.'),
+      deadline: z.string().optional().describe('When an answer stops being useful: duration like "15m" or ISO time.'),
+      default: z.string().optional().describe('Option applied if no answer by the deadline. Must be safe.'),
+      reversible: z.boolean().optional().describe('Can the action be undone afterwards?'),
+      delay_cost: z.string().optional().describe('What waiting costs, e.g. "fare goes up $80 at 6pm".'),
+      summary: z.string().optional().describe('One-paragraph context shown when the human expands the ask.'),
+      context: z.string().optional().describe('Full details (diffs, logs, drafts) for the "full context" view.'),
+      thread: z.string().optional().describe('Groups related asks, e.g. a task or ticket id.'),
+      wait_seconds: z.number().int().min(0).max(3600).optional().describe('How long to block waiting (default 120). Returns a pending id if unanswered.'),
+    },
+  }, async (args) => {
+    const input = {
+      agent: agent(),
+      question: args.question,
+      urgency: args.urgency,
+      deadline: args.deadline,
+      default: args.default,
+      reversible: args.reversible,
+      delay_cost: args.delay_cost,
+      detail: { paragraph: args.summary, full: args.context },
+      thread: args.thread,
+    };
+    if (args.options?.length) input.options = args.options;
+    else input.input = { type: 'text' };
+    try {
+      const view = await c.ask(input, { timeoutMs: (args.wait_seconds ?? 120) * 1000 });
+      return text(describe(view));
+    } catch (err) {
+      return { ...text(`Doorman error: ${err.message}`), isError: true };
+    }
+  });
+
+  server.registerTool('check_answer', {
+    title: 'Check an earlier ask',
+    description: 'Check (and optionally wait for) the answer to an earlier ask_human call that returned pending.',
+    inputSchema: { id: z.string(), wait_seconds: z.number().int().min(0).max(3600).optional() },
+  }, async ({ id, wait_seconds }) => {
+    try {
+      return text(describe(await c.wait(id, { timeoutMs: (wait_seconds ?? 30) * 1000 })));
+    } catch (err) {
+      return { ...text(`Doorman error: ${err.message}`), isError: true };
+    }
+  });
+
+  server.registerTool('notify_human', {
+    title: 'Tell the human something',
+    description: 'Send an FYI that needs no answer (task finished, something noteworthy). Doorman batches these into digests unless urgent, so use it freely instead of interrupting.',
+    inputSchema: {
+      message: z.string().describe('One line.'),
+      urgency: z.enum(['low', 'normal', 'high', 'critical']).optional(),
+      summary: z.string().optional(),
+      thread: z.string().optional(),
+    },
+  }, async (args) => {
+    try {
+      const r = await c.notify(args.message, { agent: agent(), urgency: args.urgency ?? 'low', detail: args.summary, thread: args.thread });
+      return text({ id: r.id, delivery: r.delivery });
+    } catch (err) {
+      return { ...text(`Doorman error: ${err.message}`), isError: true };
+    }
+  });
+
+  server.registerTool('get_human_state', {
+    title: 'Is the human available?',
+    description: 'Coarse availability of your human (available / focus / dnd / away) and the minimum urgency that may interrupt them. Check before starting work that will need their input soon.',
+    inputSchema: {},
+  }, async () => {
+    try {
+      return text(await c.state());
+    } catch (err) {
+      return { ...text(`Doorman error: ${err.message}`), isError: true };
+    }
+  });
+
+  await server.connect(new StdioServerTransport());
+  return server;
+}
