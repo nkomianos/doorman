@@ -1,8 +1,8 @@
-// `doorman mcp`: an MCP server any agent can add to reach you through Doorman.
+// `switchboard mcp`: an MCP server any agent can add to reach you through Switchboard.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { DoormanClient } from './client.js';
+import { SwitchboardClient } from './client.js';
 import { VERSION } from './config.js';
 import { slug } from './util.js';
 
@@ -15,10 +15,10 @@ function describe(view) {
   return view;
 }
 
-/** The Doorman MCP tools, bound to one client (stdio) or one agent key (HTTP). */
+/** The Switchboard MCP tools, bound to one client (stdio) or one agent key (HTTP). */
 export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSeconds = 3600 } = {}) {
-  const server = new McpServer({ name: 'doorman', version: VERSION });
-  const c = client || new DoormanClient();
+  const server = new McpServer({ name: 'switchboard', version: VERSION });
+  const c = client || new SwitchboardClient();
   const agent = () => {
     if (c.agent) return c.agent;
     const info = server.server.getClientVersion();
@@ -29,8 +29,8 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
   server.registerTool('ask_human', {
     title: 'Ask the human',
     description:
-      'Ask your human a question through Doorman, their attention router. Use this instead of stopping to ask in chat when you need a decision, approval or a piece of information. ' +
-      'Doorman decides when to interrupt them (now, at a natural break, or in a digest) based on urgency and their focus state, so: write one short question answerable with one tap; ' +
+      'Ask your human a question through Switchboard, their attention router. Use this instead of stopping to ask in chat when you need a decision, approval or a piece of information. ' +
+      'Switchboard decides when to interrupt them (now, at a natural break, or in a digest) based on urgency and their focus state, so: write one short question answerable with one tap; ' +
       'give 2-4 options with their consequences; set a deadline and a safe default whenever one exists (then they are not interrupted unnecessarily); be honest about urgency. ' +
       'Returns the answer, or a pending id to check later with check_answer.',
     inputSchema: {
@@ -65,7 +65,7 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
       const view = await c.ask(input, { timeoutMs: Math.min(args.wait_seconds ?? defaultWaitSeconds, maxWaitSeconds) * 1000 });
       return text(describe(view));
     } catch (err) {
-      return { ...text(`Doorman error: ${err.message}`), isError: true };
+      return { ...text(`Switchboard error: ${err.message}`), isError: true };
     }
   });
 
@@ -77,13 +77,13 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
     try {
       return text(describe(await c.wait(id, { timeoutMs: (wait_seconds ?? 30) * 1000 })));
     } catch (err) {
-      return { ...text(`Doorman error: ${err.message}`), isError: true };
+      return { ...text(`Switchboard error: ${err.message}`), isError: true };
     }
   });
 
   server.registerTool('notify_human', {
     title: 'Tell the human something',
-    description: 'Send an FYI that needs no answer (task finished, something noteworthy). Doorman batches these into digests unless urgent, so use it freely instead of interrupting.',
+    description: 'Send an FYI that needs no answer (task finished, something noteworthy). Switchboard batches these into digests unless urgent, so use it freely instead of interrupting.',
     inputSchema: {
       message: z.string().describe('One line.'),
       urgency: z.enum(['low', 'normal', 'high', 'critical']).optional(),
@@ -95,7 +95,7 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
       const r = await c.notify(args.message, { agent: agent(), urgency: args.urgency ?? 'low', detail: args.summary, thread: args.thread });
       return text({ id: r.id, delivery: r.delivery });
     } catch (err) {
-      return { ...text(`Doorman error: ${err.message}`), isError: true };
+      return { ...text(`Switchboard error: ${err.message}`), isError: true };
     }
   });
 
@@ -107,7 +107,7 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
     try {
       return text(await c.state());
     } catch (err) {
-      return { ...text(`Doorman error: ${err.message}`), isError: true };
+      return { ...text(`Switchboard error: ${err.message}`), isError: true };
     }
   });
 

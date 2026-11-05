@@ -1,6 +1,6 @@
-// `doorman demo`: three simulated agents (coding, email, travel) hit you at once.
-// Shows what reaches you with Doorman versus every agent pinging you directly.
-import { DoormanClient } from './client.js';
+// `switchboard demo`: three simulated agents (coding, email, travel) hit you at once.
+// Shows what reaches you with Switchboard versus every agent pinging you directly.
+import { SwitchboardClient } from './client.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -23,8 +23,8 @@ export const SCRIPT = [
   { at: 3300, agent: CODER, kind: 'inform', question: 'Refactor done: 12 files changed, all tests pass', urgency: 'normal', collapse_key: 'coder-status' },
 ];
 
-export async function runDemo({ client = new DoormanClient(), log = console.log, speed = 1 } = {}) {
-  if (!(await client.ensure())) throw new Error('could not reach or start the doorman daemon');
+export async function runDemo({ client = new SwitchboardClient(), log = console.log, speed = 1 } = {}) {
+  if (!(await client.ensure())) throw new Error('could not reach or start the switchboard daemon');
   const before = (await client.request('GET', '/v1/stats')).stats;
   log(`\nThree agents are about to need you: ${CODER.name}, ${MAIL.name}, ${TRAVEL.name}.`);
   log(`Open the inbox to answer: ${client.url}/\n`);
@@ -45,8 +45,8 @@ export async function runDemo({ client = new DoormanClient(), log = console.log,
   const naive = SCRIPT.length;
   const pings = d('notifications');
   log('\n── What reached you ─────────────────────────────');
-  log(`  Without Doorman: ${naive} separate interruptions from 3 agents`);
-  log(`  With Doorman:    ${pings} interruption${pings === 1 ? '' : 's'}`);
+  log(`  Without Switchboard: ${naive} separate interruptions from 3 agents`);
+  log(`  With Switchboard:    ${pings} interruption${pings === 1 ? '' : 's'}`);
   log(`    ${d('interrupted_asks')} asks delivered in ${d('interruptions')} bundle${d('interruptions') === 1 ? '' : 's'}`);
   log(`    ${d('held')} held for a natural break, ${d('digested')} saved for your digest, ${d('auto')} auto-answered by rules`);
   log('\nEverything is in your inbox now. Try:');

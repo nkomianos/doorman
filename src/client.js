@@ -1,16 +1,16 @@
 // Client SDK: how agents (and the CLI, hooks, MCP server and proxy) talk to the daemon.
 //
-//   import { askHuman } from 'doorman-attention/client';
+//   import { askHuman } from '@nkomianos/switchboard/client';
 //   const { answer } = await askHuman({ question: 'Deploy?', options: ['Deploy', 'Wait'], default: 'Wait', deadline: '15m' });
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { doormanHome, getToken, paths, readJSON } from './config.js';
+import { switchboardHome, getToken, paths, readJSON } from './config.js';
 
-const BIN = fileURLToPath(new URL('../bin/doorman.js', import.meta.url));
+const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export class DoormanError extends Error {
+export class SwitchboardError extends Error {
   constructor(message, status, body) {
     super(message);
     this.status = status;
@@ -18,14 +18,14 @@ export class DoormanError extends Error {
   }
 }
 
-export class DoormanClient {
+export class SwitchboardClient {
   constructor({ url, token, home, agent, autostart = true } = {}) {
-    this.home = home || doormanHome();
+    this.home = home || switchboardHome();
     const daemon = readJSON(paths(this.home).daemon, null);
-    this.url = (url || process.env.DOORMAN_URL || daemon?.url || 'http://127.0.0.1:7777').replace(/\/+$/, '');
-    this.token = token || process.env.DOORMAN_TOKEN || null;
-    this.agent = agent ?? (process.env.DOORMAN_AGENT ? { id: process.env.DOORMAN_AGENT, name: process.env.DOORMAN_AGENT_NAME || process.env.DOORMAN_AGENT } : null);
-    this.autostart = autostart && !url && !process.env.DOORMAN_URL;
+    this.url = (url || process.env.SWITCHBOARD_URL || daemon?.url || 'http://127.0.0.1:7777').replace(/\/+$/, '');
+    this.token = token || process.env.SWITCHBOARD_TOKEN || null;
+    this.agent = agent ?? (process.env.SWITCHBOARD_AGENT ? { id: process.env.SWITCHBOARD_AGENT, name: process.env.SWITCHBOARD_AGENT_NAME || process.env.SWITCHBOARD_AGENT } : null);
+    this.autostart = autostart && !url && !process.env.SWITCHBOARD_URL;
   }
 
   _token() {
@@ -43,11 +43,11 @@ export class DoormanClient {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
-      throw new DoormanError(`cannot reach doorman at ${this.url} (${err.cause?.code || err.message}). Start it with: doorman start`, 0);
+      throw new SwitchboardError(`cannot reach switchboard at ${this.url} (${err.cause?.code || err.message}). Start it with: switchboard start`, 0);
     }
     const text = await res.text();
     const data = text ? JSON.parse(text) : {};
-    if (!res.ok) throw new DoormanError(data.error || `HTTP ${res.status}`, res.status, data);
+    if (!res.ok) throw new SwitchboardError(data.error || `HTTP ${res.status}`, res.status, data);
     return data;
   }
 
@@ -68,7 +68,7 @@ export class DoormanClient {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
-      env: { ...process.env, DOORMAN_HOME: this.home },
+      env: { ...process.env, SWITCHBOARD_HOME: this.home },
     });
     child.unref();
     for (let i = 0; i < 40; i++) {
@@ -94,7 +94,7 @@ export class DoormanClient {
   async wait(id, { timeoutMs = Infinity, signal } = {}) {
     const end = Date.now() + timeoutMs;
     for (;;) {
-      if (signal?.aborted) throw new DoormanError('aborted', 0);
+      if (signal?.aborted) throw new SwitchboardError('aborted', 0);
       const left = end - Date.now();
       const slice = Math.max(1, Math.min(25, Math.ceil(left / 1000)));
       const view = await this.request('GET', `/v1/asks/${id}/wait?timeout=${slice}s`);
@@ -125,15 +125,15 @@ export class DoormanClient {
 
 /** opts: client options ({ url, token, agent, ... }) plus { timeoutMs }. */
 export function askHuman(input, opts = {}) {
-  return new DoormanClient(opts).ask(input, opts);
+  return new SwitchboardClient(opts).ask(input, opts);
 }
 
 export function notifyHuman(message, input = {}, opts = {}) {
-  return new DoormanClient(opts).notify(message, input);
+  return new SwitchboardClient(opts).notify(message, input);
 }
 
 export function getHumanState(opts = {}) {
-  return new DoormanClient(opts).state();
+  return new SwitchboardClient(opts).state();
 }
 
-export const daemonInfo = (home = doormanHome()) => (existsSync(paths(home).daemon) ? readJSON(paths(home).daemon, null) : null);
+export const daemonInfo = (home = switchboardHome()) => (existsSync(paths(home).daemon) ? readJSON(paths(home).daemon, null) : null);

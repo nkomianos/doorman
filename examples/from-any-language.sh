@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Doorman speaks plain HTTP, so any language or script can ask you something.
+# Switchboard speaks plain HTTP, so any language or script can ask you something.
 set -euo pipefail
-URL="${DOORMAN_URL:-http://127.0.0.1:7777}"
-TOKEN="$(cat "${DOORMAN_HOME:-$HOME/.doorman}/token")"
+URL="${SWITCHBOARD_URL:-http://127.0.0.1:7777}"
+TOKEN="$(cat "${SWITCHBOARD_HOME:-$HOME/.switchboard}/token")"
 H=(-H "Authorization: Bearer $TOKEN" -H "content-type: application/json")
 
 # 1. Create the ask (and long-poll up to 25s for a quick answer).
@@ -23,4 +23,4 @@ while :; do
 done
 echo "$V" | sed -E 's/.*"label":"([^"]*)".*/Answer: \1/'
 
-# Or simply, from any shell:   doorman ask "Upload anyway?" -o Upload -o Skip --default Skip --deadline 30m
+# Or simply, from any shell:   switchboard ask "Upload anyway?" -o Upload -o Skip --default Skip --deadline 30m

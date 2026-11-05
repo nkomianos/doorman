@@ -112,7 +112,7 @@ describe('calendar', () => {
 
 describe('ledger', () => {
   test('detects tampering', () => {
-    const file = join(mkdtempSync(join(tmpdir(), 'doorman-ledger-')), 'ledger.jsonl');
+    const file = join(mkdtempSync(join(tmpdir(), 'switchboard-ledger-')), 'ledger.jsonl');
     const l = new Ledger(file);
     l.append('ask.created', { id: 'a1', question: 'Deploy?' });
     l.append('ask.resolved', { id: 'a1', status: 'answered', answer: { option: 'deny' } });

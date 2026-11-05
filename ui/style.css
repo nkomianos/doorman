@@ -1,4 +1,4 @@
-/* Doorman inbox. Tokens first; everything else uses them. */
+/* Switchboard inbox. Tokens first; everything else uses them. */
 :root {
   /* Neutrals: cool zinc greys. One accent (indigo). Status colours only where they mean something. */
   --bg: #f7f7f8;

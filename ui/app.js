@@ -1,6 +1,6 @@
-// Doorman inbox. No build step, no framework: state lives in `S`, render() redraws from it.
-const TOKEN = document.querySelector('meta[name="doorman-token"]').content;
-const VERSION = document.querySelector('meta[name="doorman-version"]').content;
+// Switchboard inbox. No build step, no framework: state lives in `S`, render() redraws from it.
+const TOKEN = document.querySelector('meta[name="switchboard-token"]').content;
+const VERSION = document.querySelector('meta[name="switchboard-version"]').content;
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -269,7 +269,7 @@ function answer(a, option) {
   const label = optLabel(a, option);
   commitLater(a, {
     msg: `Sent “${label}” to ${a.agent.name}`,
-    sub: d.always ? 'Saved as a rule: Doorman will answer this for you next time' : '',
+    sub: d.always ? 'Saved as a rule: Switchboard will answer this for you next time' : '',
     run: async () => { await api('POST', `/v1/asks/${a.id}/answer`, { option, always: !!d.always, surface: 'web' }, { keepalive: true }); S.drafts.delete(a.id); },
   });
 }
@@ -421,7 +421,7 @@ function timer(a) {
   if (!a.deadline) return '';
   const def = defaultOpt(a);
   const prefix = a.kind === 'inform' ? 'Expires' : def ? `“${trunc(def.label, 18)}” in` : 'Expires in';
-  return `<span class="timer" data-deadline="${a.deadline}" data-prefix="${esc(prefix)}" title="${esc(def ? `If you don't answer by ${fmtTime(a.deadline)}, Doorman answers “${def.label}” for you` : `The agent stops waiting at ${fmtTime(a.deadline)}`)}">${I('clock', 13)}<span></span></span>`;
+  return `<span class="timer" data-deadline="${a.deadline}" data-prefix="${esc(prefix)}" title="${esc(def ? `If you don't answer by ${fmtTime(a.deadline)}, Switchboard answers “${def.label}” for you` : `The agent stops waiting at ${fmtTime(a.deadline)}`)}">${I('clock', 13)}<span></span></span>`;
 }
 
 function snoozeMenu(a) {
@@ -442,7 +442,7 @@ function askCard(a, sel) {
   S.seen.add(a.id);
   const facts = [];
   if (a.delay_cost) facts.push(`${I('zap', 14)} Waiting costs <strong>${esc(a.delay_cost)}</strong>`);
-  if (a.deadline && !def && a.kind !== 'inform') facts.push(`${I('alert', 14)} <span>No safe default. Doorman will ping you before it expires</span>`);
+  if (a.deadline && !def && a.kind !== 'inform') facts.push(`${I('alert', 14)} <span>No safe default. Switchboard will ping you before it expires</span>`);
   if (a.reversible === true) facts.push(`${I('undo', 14)} Can be undone`);
 
   let body = '';
@@ -487,13 +487,13 @@ function askCard(a, sel) {
     ${detail.paragraph || detail.full ? `<details class="more" data-more="${a.id}" ${S.open.has(a.id) ? 'open' : ''}><summary>More context</summary>${detail.paragraph ? `<p>${esc(detail.paragraph)}</p>` : ''}${detail.full ? `<pre class="full">${esc(detail.full)}</pre>` : ''}</details>` : ''}
     ${body}
     <div class="card-foot">
-      ${canAlways ? `<label class="toggle" title="Make a rule: next time this exact request comes in, Doorman answers the same way without asking you"><input type="checkbox" data-always="${a.id}" ${draft.always ? 'checked' : ''}><span class="sw"></span><span>Always do this${a.fingerprint ? ` for <code>${esc(trunc(a.fingerprint, 40))}</code>` : ''}</span></label>` : ''}
+      ${canAlways ? `<label class="toggle" title="Make a rule: next time this exact request comes in, Switchboard answers the same way without asking you"><input type="checkbox" data-always="${a.id}" ${draft.always ? 'checked' : ''}><span class="sw"></span><span>Always do this${a.fingerprint ? ` for <code>${esc(trunc(a.fingerprint, 40))}</code>` : ''}</span></label>` : ''}
       <span class="grow"></span>
       <span class="menu-anchor">
         <button class="btn ghost sm" data-act="snooze-menu" data-id="${a.id}" aria-haspopup="menu" aria-expanded="${menuOpen}" aria-keyshortcuts="s">${I('clock', 15)} Snooze</button>
         ${menuOpen ? snoozeMenu(a) : ''}
       </span>
-      <button class="btn ghost sm" data-act="dismiss" data-id="${a.id}" aria-keyshortcuts="d" title="${esc(def ? `Answers “${def.label}” and` : 'Answers no and')} tells Doorman this wasn't worth your attention">${I('x', 15)} Dismiss</button>
+      <button class="btn ghost sm" data-act="dismiss" data-id="${a.id}" aria-keyshortcuts="d" title="${esc(def ? `Answers “${def.label}” and` : 'Answers no and')} tells Switchboard this wasn't worth your attention">${I('x', 15)} Dismiss</button>
     </div>
     ${deliveryLine(a)}
   </article>`;
@@ -526,7 +526,7 @@ function viewInbox() {
     const checklist = S.loaded ? setupChecklist({ compact: !!s.asks }) : '';
     if (checklist && !s.asks) return head + checklist;
     return head + checklist + emptyState('check', 'You’re all caught up', s.asks
-      ? `Doorman has handled ${plural(s.asks, 'request')} and interrupted you ${plural(s.notifications || 0, 'time')}. New decisions will show up here.`
+      ? `Switchboard has handled ${plural(s.asks, 'request')} and interrupted you ${plural(s.notifications || 0, 'time')}. New decisions will show up here.`
       : 'When an agent needs a decision, it lands here.', `<button class="btn" data-act="demo">${I('play', 14)} Try with sample agents</button>`);
   }
   let html = head;
@@ -630,7 +630,7 @@ function viewHistory() {
       <span class="ico ${o.cls}">${I(o.icon, 15)}</span>
       <div><div class="title">${esc(a.question)}</div><div class="sub"><span>${esc(a.agent.name)}</span><span>·</span><span>${esc(o.text)}</span></div></div>
       <div class="side">${fmtTime(t)}</div>
-      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Doorman pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}${a.status === 'auto' && String(a.answer?.by).startsWith('rule:') && S.rules.some((r) => r.id === a.answer.by.slice(5)) ? `<div class="form-actions"><button class="btn sm" data-act="rule-rm" data-id="${esc(a.answer.by.slice(5))}">Stop answering this for me</button></div>` : ''}</div>` : ''}
+      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Switchboard pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}${a.status === 'auto' && String(a.answer?.by).startsWith('rule:') && S.rules.some((r) => r.id === a.answer.by.slice(5)) ? `<div class="form-actions"><button class="btn sm" data-act="rule-rm" data-id="${esc(a.answer.by.slice(5))}">Stop answering this for me</button></div>` : ''}</div>` : ''}
     </div>`;
   }
   return `${html}${rows}</div>`;
@@ -679,7 +679,7 @@ function viewRules() {
   if (S.ruleForm) {
     html += `<form id="rule-form" class="panel form" autocomplete="off">
       <h2>New rule</h2>
-      <p class="help" style="margin:0 0 6px">Fill in what to match (leave a field empty to match anything), then what Doorman should do. <code>*</code> matches any text and <code>|</code> means “or”.</p>
+      <p class="help" style="margin:0 0 6px">Fill in what to match (leave a field empty to match anything), then what Switchboard should do. <code>*</code> matches any text and <code>|</code> means “or”.</p>
       <div class="grid2">
         <label class="field">Agent <input name="agent" placeholder="e.g. Email agent or claude-code-*"></label>
         <label class="field"><span>Request <small>fingerprint</small></span><input name="fingerprint" placeholder="e.g. Bash:npm test*"></label>
@@ -747,7 +747,7 @@ function viewSettings() {
   const n = c.ntfy || {};
   const cs = S.state?.calendar || {};
   const notif = 'Notification' in window ? Notification.permission : 'unsupported';
-  const cli = S.config.cli || 'doorman';
+  const cli = S.config.cli || 'switchboard';
   const testBox = testBoxHtml();
   return viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox);
 }
@@ -758,7 +758,7 @@ function testBoxHtml() {
   return !tr ? '' : tr.errors && Object.keys(tr.errors).length
     ? `<div class="callout bad">${I('alert', 16)}<div>Couldn't send: ${esc(Object.entries(tr.errors).map(([k, v]) => `${k}: ${v}`).join('; '))}</div></div>`
     : `<div class="callout ok">${I('check', 16)}<div><b>Sent to ${esc(tr.sent.join(' and ') || 'nothing')}.</b> Didn't see it?${isWin
-      ? '<ul><li>Turn off <b>Do not disturb</b> (Windows hides banners while it’s on and files them in the notification center).</li><li>Open <b>Settings → System → Notifications</b>, find <b>Doorman</b> and make sure <b>Show notification banners</b> is on.</li></ul>'
+      ? '<ul><li>Turn off <b>Do not disturb</b> (Windows hides banners while it’s on and files them in the notification center).</li><li>Open <b>Settings → System → Notifications</b>, find <b>Switchboard</b> and make sure <b>Show notification banners</b> is on.</li></ul>'
       : '<ul><li>Check that Focus / Do Not Disturb is off.</li><li>Allow notifications for your terminal app or “Script Editor” in system settings.</li></ul>'}</div></div>`;
 }
 
@@ -768,7 +768,7 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
   <form id="settings" class="form" autocomplete="off">
     <section class="panel" id="s-notifications">
       <h2>Notifications on this computer</h2>
-      <p class="help">How Doorman gets your attention when something is worth interrupting you for.</p>
+      <p class="help">How Switchboard gets your attention when something is worth interrupting you for.</p>
       <label class="toggle"><input type="checkbox" name="desktop" ${c.desktop !== false ? 'checked' : ''}><span class="sw"></span><span>Show desktop notifications</span></label>
       <div class="form-actions" style="margin-top:12px"><button class="btn" type="button" data-act="test-notify">${I('bell', 15)} Send a test notification</button>
         <span class="help" style="margin:0">Browser notifications for this tab: <b>${esc(notif)}</b></span>
@@ -781,7 +781,7 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
       <p class="help">Prefer Telegram? Set it up on the <a href="#connect/phone" data-view="connect">Connect</a> page. ntfy: pings with one-tap answer buttons, through the free <a href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app. Your answers come back over a signed channel, so nothing on this computer is exposed to the internet.</p>
       <div class="grid2">
         <label class="field"><span>Topic <small>treat it like a password</small></span><span style="display:flex;gap:6px"><input name="n_topic" value="${esc(n.topic || '')}" placeholder="Click Generate"><button class="btn" type="button" data-act="gen-topic">Generate</button></span></label>
-        <label class="field">Send to phone<select name="n_mirror"><option value="always" ${n.mirror !== 'away' ? 'selected' : ''}>Every time Doorman pings me</option><option value="away" ${n.mirror === 'away' ? 'selected' : ''}>Only when I'm away</option></select></label>
+        <label class="field">Send to phone<select name="n_mirror"><option value="always" ${n.mirror !== 'away' ? 'selected' : ''}>Every time Switchboard pings me</option><option value="away" ${n.mirror === 'away' ? 'selected' : ''}>Only when I'm away</option></select></label>
         <label class="field">Server<input name="n_server" value="${esc(n.server || 'https://ntfy.sh')}"></label>
         <label class="field"><span>Access token <small>optional</small></span><input name="n_token" type="password" value="${esc(n.token || '')}"></label>
       </div>
@@ -791,7 +791,7 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
 
     <section class="panel" id="s-schedule">
       <h2>Schedule</h2>
-      <p class="help">When your status is set to Automatic, Doorman uses these. A status you pick yourself always wins.</p>
+      <p class="help">When your status is set to Automatic, Switchboard uses these. A status you pick yourself always wins.</p>
       <div class="grid2">
         <label class="field">Quiet hours from<input name="q_start" type="time" value="${esc(q.start || '')}"></label>
         <label class="field">until<input name="q_end" type="time" value="${esc(q.end || '')}"></label>
@@ -814,7 +814,7 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
 
     <section class="panel" id="s-delivery">
       <h2>Delivery</h2>
-      <p class="help">How Doorman batches requests that don't need you right away.</p>
+      <p class="help">How Switchboard batches requests that don't need you right away.</p>
       <div class="grid2">
         <label class="field"><span>Bundle requests that arrive within <small>seconds</small></span><input name="bundle" type="number" min="0" max="120" value="${Math.round((c.bundleWindowMs ?? 4000) / 1000)}"></label>
         <label class="field"><span>Digest times <small>comma separated</small></span><input name="digest" value="${esc((c.digest?.times || []).join(', '))}" placeholder="12:00, 17:30"></label>
@@ -836,12 +836,12 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
       <div class="field">Gate risky tools on any MCP server${cmdBox(`${cli} proxy --name github --gate "delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github`)}</div>
     </div>
   </section>
-  <p class="help">Doorman ${esc(VERSION)} · data in <span class="mono">${esc(S.config.home)}</span> · port ${S.config.port}</p>`;
+  <p class="help">Switchboard ${esc(VERSION)} · data in <span class="mono">${esc(S.config.home)}</span> · port ${S.config.port}</p>`;
 }
 
 // ------------------------------------------------------------ now & setup
 
-/** The four things that make Doorman useful, and whether each is done. */
+/** The four things that make Switchboard useful, and whether each is done. */
 function setupSteps() {
   const c = S.config?.config || {};
   const realAgents = S.agents.filter((g) => !g.id.startsWith('demo-'));
@@ -849,7 +849,7 @@ function setupSteps() {
     { key: 'demo', title: 'See it with sample agents', text: 'Three made-up agents send 12 requests at once. See how few of them actually ping you.', done: (S.stats?.asks || 0) > 0, action: `<button class="btn primary sm" data-act="demo">${I('play', 14)} Run the demo</button>` },
     { key: 'agents', title: 'Connect your agents', text: 'One click for Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes or Muse Code. Grok and other cloud agents connect through a tunnel.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>` },
     { key: 'phone', title: 'Get pings on your phone', text: 'Answer from your lock screen with one tap, through Telegram or ntfy.', done: !!(S.config?.telegram?.paired || c.ntfy?.topic), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="phone">${I('phone', 14)} Set up phone</button>` },
-    { key: 'context', title: 'Tell Doorman when you’re busy', text: 'Connect a calendar, or let it notice when you step away or join a call.', done: !!(c.calendar?.ics || c.activity?.enabled), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="calendar">${I('calendar', 14)} Calendar &amp; activity</button>` },
+    { key: 'context', title: 'Tell Switchboard when you’re busy', text: 'Connect a calendar, or let it notice when you step away or join a call.', done: !!(c.calendar?.ics || c.activity?.enabled), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="calendar">${I('calendar', 14)} Calendar &amp; activity</button>` },
   ];
 }
 
@@ -858,8 +858,8 @@ function setupChecklist({ compact = false } = {}) {
   const done = steps.filter((s) => s.done).length;
   if (done === steps.length) return '';
   return `<section class="welcome${compact ? ' compact' : ''}">
-    <div class="welcome-head"><div><h2>${compact ? 'Finish setting up' : 'Welcome to Doorman'}</h2>
-      <p>${compact ? `${done} of ${steps.length} done.` : 'Doorman sits between your AI agents and you. Every request lands here, and Doorman decides which ones are worth interrupting you for, and when.'}</p></div>
+    <div class="welcome-head"><div><h2>${compact ? 'Finish setting up' : 'Welcome to Switchboard'}</h2>
+      <p>${compact ? `${done} of ${steps.length} done.` : 'Switchboard sits between your AI agents and you. Every request lands here, and Switchboard decides which ones are worth interrupting you for, and when.'}</p></div>
       <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${steps.length}" aria-valuenow="${done}" aria-label="Setup progress"><i style="width:${(done / steps.length) * 100}%"></i></div></div>
     <ol class="checklist">${steps.map((s) => `<li class="${s.done ? 'is-done' : ''}">
       <span class="tick" aria-hidden="true">${s.done ? I('check', 14) : ''}</span>
@@ -920,8 +920,8 @@ function snippet(lang, key) {
   return {
     curl: `curl -s ${url}/v1/asks?wait=25s \\\n  -H "Authorization: Bearer ${k}" \\\n  -H "content-type: application/json" \\\n  -d '{"question":"Deploy v2 to production?","options":["Deploy","Wait"],"default":"Wait","deadline":"30m"}'`,
     python: `import requests\n\nr = requests.post("${url}/v1/asks?wait=25s",\n    headers={"Authorization": "Bearer ${k}"},\n    json={"question": "Deploy v2 to production?", "options": ["Deploy", "Wait"],\n          "default": "Wait", "deadline": "30m"})\nask = r.json()\nwhile not ask.get("final"):\n    ask = requests.get(f"${url}/v1/asks/{ask['id']}/wait", headers={"Authorization": "Bearer ${k}"}).json()\nprint(ask["answer"]["label"])`,
-    js: `import { DoormanClient } from 'doorman-attention/client';\n\nconst doorman = new DoormanClient({ url: '${url}', token: '${k}' });\nconst r = await doorman.ask({ question: 'Deploy v2 to production?', options: ['Deploy', 'Wait'], default: 'Wait', deadline: '30m' });\nconsole.log(r.answer?.label);`,
-    mcp: JSON.stringify({ mcpServers: { doorman: { command: 'node', args: [S.config?.cli?.match(/"(.+)"/)?.[1] || 'bin/doorman.js', 'mcp'], env: { DOORMAN_TOKEN: k } } } }, null, 2),
+    js: `import { SwitchboardClient } from '@nkomianos/switchboard/client';\n\nconst switchboard = new SwitchboardClient({ url: '${url}', token: '${k}' });\nconst r = await switchboard.ask({ question: 'Deploy v2 to production?', options: ['Deploy', 'Wait'], default: 'Wait', deadline: '30m' });\nconsole.log(r.answer?.label);`,
+    mcp: JSON.stringify({ mcpServers: { switchboard: { command: 'node', args: [S.config?.cli?.match(/"(.+)"/)?.[1] || 'bin/switchboard.js', 'mcp'], env: { SWITCHBOARD_TOKEN: k } } } }, null, 2),
   }[lang];
 }
 
@@ -929,11 +929,11 @@ function viewConnect() {
   const c = S.config?.config || {};
   const tg = S.config?.telegram;
   const tgc = c.telegram;
-  let html = pageHead('Connect', 'Everything Doorman needs to reach you, and for your agents to reach Doorman.');
+  let html = pageHead('Connect', 'Everything Switchboard needs to reach you, and for your agents to reach Switchboard.');
   html += setupChecklist({ compact: true });
 
   // Agents on this computer
-  html += `<section class="panel" id="s-agents"><h2>Agents on this computer</h2><p class="help">Doorman edits each agent’s config for you and keeps a backup next to it (<code>.doorman-bak</code>). You can disconnect any time.</p>
+  html += `<section class="panel" id="s-agents"><h2>Agents on this computer</h2><p class="help">Switchboard edits each agent’s config for you and keeps a backup next to it (<code>.switchboard-bak</code>). You can disconnect any time.</p>
     <div class="integrations">${S.integrations.map((i) => `<div class="integration${i.connected ? ' on' : ''}">
       <div class="int-head"><b>${esc(i.name)}</b><span class="status-pill ${i.connected ? 'done' : i.detected ? 'idle' : 'off'}">${i.connected ? 'Connected' : i.detected ? 'Installed' : 'Not found'}</span></div>
       <p>${esc(i.description)}</p>
@@ -955,8 +955,8 @@ function viewConnect() {
         <div class="form-actions" style="margin-top:12px"><button class="btn sm" data-act="remote" data-on="0">Turn off cloud access</button></div>`
       : `<ol class="mini-steps">
           <li><b>Create an agent key</b> for it, under <a href="#connect/other" data-act="go" data-view="connect" data-anchor="other">Any other agent</a> below.</li>
-          <li><b>Open a tunnel.</b> Doorman can do it with Cloudflare’s free quick tunnels:${cmdBox(`${S.config?.cli || 'doorman'} tunnel`)}<span class="help">Needs <code>cloudflared</code>: <code>winget install --id Cloudflare.cloudflared</code> on Windows, <code>brew install cloudflared</code> on macOS. Using ngrok or your own tunnel instead? <button class="link-btn" data-act="remote" data-on="1">Allow cloud agents</button> and paste its URL.</span></li>
-          <li><b>Add Doorman to your agent</b> with the URL it prints: <code>https://…/mcp?key=…</code></li>
+          <li><b>Open a tunnel.</b> Switchboard can do it with Cloudflare’s free quick tunnels:${cmdBox(`${S.config?.cli || 'switchboard'} tunnel`)}<span class="help">Needs <code>cloudflared</code>: <code>winget install --id Cloudflare.cloudflared</code> on Windows, <code>brew install cloudflared</code> on macOS. Using ngrok or your own tunnel instead? <button class="link-btn" data-act="remote" data-on="1">Allow cloud agents</button> and paste its URL.</span></li>
+          <li><b>Add Switchboard to your agent</b> with the URL it prints: <code>https://…/mcp?key=…</code></li>
         </ol>`}
     <div class="cloud-agents">
       <div><b>Grok &amp; Grok Bot</b><p>grok.com/connectors → <b>New connector</b> → <b>Custom</b> → paste the MCP URL. Custom connectors need a paid Grok plan.</p></div>
@@ -966,13 +966,13 @@ function viewConnect() {
   </section>`;
 
   // Phone
-  html += `<section class="panel" id="s-phone"><h2>Your phone</h2><p class="help">Pick one. Both are free, give you one-tap answer buttons, and never expose this computer to the internet: Doorman only makes outgoing connections.</p>
+  html += `<section class="panel" id="s-phone"><h2>Your phone</h2><p class="help">Pick one. Both are free, give you one-tap answer buttons, and never expose this computer to the internet: Switchboard only makes outgoing connections.</p>
     <div class="phone-options">
       <div class="phone-card">
         <div class="int-head"><b>Telegram</b>${tg?.paired ? '<span class="status-pill done">Connected</span>' : '<span class="status-pill idle">Recommended</span>'}</div>
         ${tg?.paired ? `<p>Connected through <b>@${esc(tg.bot?.username || 'your bot')}</b>${tgc?.username ? ` to <b>${esc(tgc.username)}</b>` : ''}. Requests arrive with buttons; reply to a message to answer a question. Commands: <code>/status</code> <code>/inbox</code> <code>/focus 1h</code> <code>/away</code>.</p>
           <div class="grid2 form" style="margin-top:0">
-            <label class="field">Send to Telegram<select data-tg="mirror"><option value="always" ${tgc?.mirror !== 'away' ? 'selected' : ''}>Every time Doorman pings me</option><option value="away" ${tgc?.mirror === 'away' ? 'selected' : ''}>Only when I’m away</option></select></label>
+            <label class="field">Send to Telegram<select data-tg="mirror"><option value="always" ${tgc?.mirror !== 'away' ? 'selected' : ''}>Every time Switchboard pings me</option><option value="away" ${tgc?.mirror === 'away' ? 'selected' : ''}>Only when I’m away</option></select></label>
             <label class="toggle" style="align-self:end"><input type="checkbox" data-tg="redact" ${tgc?.redact ? 'checked' : ''}><span class="sw"></span><span>Hide question text</span></label>
           </div>
           <div class="form-actions"><button class="btn sm" data-act="test-notify">${I('bell', 14)} Send a test</button><button class="btn ghost sm" data-act="tg-remove">Disconnect</button></div>`
@@ -981,7 +981,7 @@ function viewConnect() {
         : `<ol class="mini-steps">
             <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a>, send <code>/newbot</code> and pick any name. It replies with a token.</li>
             <li>Paste the token here:<div class="inline-form"><input class="input" type="password" autocomplete="off" placeholder="123456789:AA…" data-tg-token aria-label="Telegram bot token"><button class="btn primary sm" data-act="tg-save">Connect</button></div>${tg?.error ? `<span class="bad-t help">${esc(tg.error)}</span>` : ''}</li>
-            <li>Tap Start on your new bot. Doorman shows you the link.</li></ol>`}
+            <li>Tap Start on your new bot. Switchboard shows you the link.</li></ol>`}
       </div>
       <div class="phone-card">
         <div class="int-head"><b>ntfy</b>${c.ntfy?.topic ? '<span class="status-pill done">Connected</span>' : ''}</div>
@@ -994,7 +994,7 @@ function viewConnect() {
   // Calendar
   const [provName, provHelp] = CAL_HELP[S.calProvider];
   const cal = S.calendar;
-  html += `<section class="panel" id="s-calendar"><h2>Calendar</h2><p class="help">During meetings Doorman holds everything but urgent requests, then delivers them in one go when the meeting ends. The calendar is read on this computer. Agents only ever see “Focus” or “Available”, never your events.</p>
+  html += `<section class="panel" id="s-calendar"><h2>Calendar</h2><p class="help">During meetings Switchboard holds everything but urgent requests, then delivers them in one go when the meeting ends. The calendar is read on this computer. Agents only ever see “Focus” or “Available”, never your events.</p>
     ${c.calendar?.ics ? `<div class="callout ${cal?.status?.error ? 'bad' : 'ok'}">${I(cal?.status?.error ? 'alert' : 'check', 16)}<div>${cal?.status?.error ? `Couldn’t read your calendar: ${esc(cal.status.error)}` : `<b>Connected.</b> ${plural(cal?.status?.events_next_48h ?? 0, 'busy block')} in the next 48 hours.`}</div></div>
       ${cal?.upcoming?.length ? `<ul class="events">${cal.upcoming.map((e) => `<li><span class="when">${esc(fmtWhen(e.start))}–${esc(fmtTime(e.end))}</span><span class="what">${esc(e.summary || 'Busy')}</span><span class="status-pill ${e.mode === 'dnd' ? 'waiting' : 'idle'}">${esc(MODES[e.mode]?.label ?? e.mode)}</span></li>`).join('')}</ul>` : ''}
       <div class="form-actions" style="margin-top:12px"><button class="btn ghost sm" data-act="cal-remove">Disconnect calendar</button></div>`
@@ -1009,7 +1009,7 @@ function viewConnect() {
   // Activity
   const a = c.activity || {};
   html += `<section class="panel" id="s-activity"><h2>Notice when I’m away or on a call</h2>
-    <p class="help">Optional. Doorman checks two things every 10 seconds: how long since you touched the keyboard or mouse, and the <i>name</i> of the app in front (like “Zoom” or “VS Code”). Never window titles, never what you type, never screenshots. Nothing is stored or sent anywhere.</p>
+    <p class="help">Optional. Switchboard checks two things every 10 seconds: how long since you touched the keyboard or mouse, and the <i>name</i> of the app in front (like “Zoom” or “VS Code”). Never window titles, never what you type, never screenshots. Nothing is stored or sent anywhere.</p>
     ${S.config?.activity_supported === false ? '<div class="callout warn">Not supported on this system yet.</div>' : `
     <label class="toggle"><input type="checkbox" data-act-cfg="enabled" ${a.enabled ? 'checked' : ''}><span class="sw"></span><span><b>Sense my activity</b></span></label>
     <div class="activity-opts${a.enabled ? '' : ' is-off'}">
@@ -1027,7 +1027,7 @@ function viewConnect() {
     ${S.keys.length ? `<div class="list keys">${S.keys.map((k) => `<div class="item"><span class="ico">${I('key', 15)}</span><div><div class="title">${esc(k.name)}</div><div class="sub"><span class="mono">${esc(k.prefix)}…</span><span>·</span><span>agent id <span class="mono">${esc(k.agent_id)}</span></span><span>·</span><span>${k.last_used ? `used ${fmtAgo(k.last_used)}` : 'never used'}</span></div></div><div class="side"><button class="btn ghost sm" data-act="key-revoke" data-id="${k.id}">Revoke</button></div></div>`).join('')}</div>` : ''}
     <div class="chips" role="tablist" aria-label="Example" style="margin-top:16px">${[['curl', 'curl'], ['python', 'Python'], ['js', 'JavaScript'], ['mcp', 'MCP config']].map(([k, n]) => `<button class="chip-btn" role="tab" data-act="snippet-lang" data-key="${k}" aria-pressed="${S.snippetLang === k}">${n}</button>`).join('')}</div>
     <div class="code-block"><pre class="full">${esc(snippet(S.snippetLang, S.newKey?.key))}</pre><button class="btn ghost sm" data-act="copy" data-text="${esc(snippet(S.snippetLang, S.newKey?.key))}">${I('copy', 14)} Copy</button></div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn sm" data-act="test-ask">${I('play', 14)} Send me a test request</button><span class="help" style="margin:0">Full format: <a href="https://github.com/nkomianos/doorman/blob/main/spec/ask-v0.1.md" target="_blank" rel="noreferrer">the Ask spec</a></span></div>
+    <div class="form-actions" style="margin-top:12px"><button class="btn sm" data-act="test-ask">${I('play', 14)} Send me a test request</button><span class="help" style="margin:0">Full format: <a href="https://github.com/nkomianos/switchboard/blob/main/spec/ask-v0.1.md" target="_blank" rel="noreferrer">the Ask spec</a></span></div>
   </section>`;
   return html;
 }
@@ -1054,8 +1054,8 @@ function renderNav() {
     ${item('rules', 'rules', 'Rules', S.suggestions.length, true)}
     ${item('activity', 'shield', 'Activity log')}
     ${item('settings', 'gear', 'Settings')}
-    ${s?.asks ? `<div class="impact" title="Since Doorman started"><strong>${s.notifications} of ${s.asks}</strong>requests actually interrupted you<div class="row2"><span><b>${s.auto}</b> by rules</span><span><b>${s.digested}</b> to digests</span></div></div>` : ''}`;
-  document.title = inbox ? `(${inbox}) Doorman` : 'Doorman';
+    ${s?.asks ? `<div class="impact" title="Since Switchboard started"><strong>${s.notifications} of ${s.asks}</strong>requests actually interrupted you<div class="row2"><span><b>${s.auto}</b> by rules</span><span><b>${s.digested}</b> to digests</span></div></div>` : ''}`;
+  document.title = inbox ? `(${inbox}) Switchboard` : 'Switchboard';
 }
 
 function renderStatus() {
@@ -1275,8 +1275,8 @@ document.addEventListener('click', async (e) => {
       toast(muted ? `Muted ${g?.name}` : `Unmuted ${g?.name}`, { sub: muted ? 'Its requests still land in your inbox, but never ping you' : '' });
     } catch (err) { fail(err); } return undefined;
     case 'reset': try { await api('POST', `/v1/agents/${encodeURIComponent(b.dataset.agent)}/reset`); await loadAgents(); render(); toast('Budget reset'); } catch (err) { fail(err); } return undefined;
-    case 'sug-accept': try { await api('POST', `/v1/suggestions/${id}/accept`); await loadRules(); render(); toast('Rule created', { sub: 'Doorman will answer this for you from now on' }); } catch (err) { fail(err); } return undefined;
-    case 'sug-decline': try { await api('POST', `/v1/suggestions/${id}/decline`); await loadRules(); render(); toast('OK, Doorman will keep asking you'); } catch (err) { fail(err); } return undefined;
+    case 'sug-accept': try { await api('POST', `/v1/suggestions/${id}/accept`); await loadRules(); render(); toast('Rule created', { sub: 'Switchboard will answer this for you from now on' }); } catch (err) { fail(err); } return undefined;
+    case 'sug-decline': try { await api('POST', `/v1/suggestions/${id}/decline`); await loadRules(); render(); toast('OK, Switchboard will keep asking you'); } catch (err) { fail(err); } return undefined;
     case 'rule-form': S.ruleForm = !S.ruleForm; render(); if (S.ruleForm) $('#rule-form input')?.focus(); return undefined;
     case 'rule-rm': {
       const r = S.rules.find((x) => x.id === id);
@@ -1303,7 +1303,7 @@ document.addEventListener('click', async (e) => {
     case 'gen-topic': {
       const bytes = crypto.getRandomValues(new Uint8Array(12));
       const input = $('[name="n_topic"]');
-      input.value = `doorman-${[...bytes].map((x) => x.toString(36)).join('').slice(0, 18)}`;
+      input.value = `switchboard-${[...bytes].map((x) => x.toString(36)).join('').slice(0, 18)}`;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return toast('Topic generated', { sub: 'Save, then subscribe to it in the ntfy app' });
     }
@@ -1311,7 +1311,7 @@ document.addEventListener('click', async (e) => {
     case 'integration': {
       const on = b.dataset.on === '1';
       const name = S.integrations.find((x) => x.id === id)?.name || id;
-      if (!on && !confirm(`Disconnect ${name}? Doorman removes only its own entries and keeps a backup.`)) return undefined;
+      if (!on && !confirm(`Disconnect ${name}? Switchboard removes only its own entries and keeps a backup.`)) return undefined;
       b.disabled = true;
       try {
         const r = await api('POST', `/v1/integrations/${id}`, { connected: on });
@@ -1332,7 +1332,7 @@ document.addEventListener('click', async (e) => {
       return undefined;
     }
     case 'tg-remove':
-      if (S.config?.telegram?.paired && !confirm('Disconnect Telegram? Doorman stops sending to your phone there.')) return undefined;
+      if (S.config?.telegram?.paired && !confirm('Disconnect Telegram? Switchboard stops sending to your phone there.')) return undefined;
       try { S.config = await api('PATCH', '/v1/config', { telegram: null }); render(); toast('Telegram disconnected'); } catch (err) { fail(err); }
       return undefined;
     case 'cal-provider': S.calProvider = b.dataset.key; return render();
@@ -1387,7 +1387,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'test-ask':
       try {
-        await api('POST', '/v1/asks', { agent: { id: 'test-agent', name: 'Test agent' }, question: 'Is Doorman set up the way you want?', options: [{ id: 'yes', label: 'Yes', style: 'primary' }, { id: 'later', label: 'Not yet' }], urgency: 'high', detail: 'This is a test request from the Connect page.', default: 'later', deadline: '1h' });
+        await api('POST', '/v1/asks', { agent: { id: 'test-agent', name: 'Test agent' }, question: 'Is Switchboard set up the way you want?', options: [{ id: 'yes', label: 'Yes', style: 'primary' }, { id: 'later', label: 'Not yet' }], urgency: 'high', detail: 'This is a test request from the Connect page.', default: 'later', deadline: '1h' });
         toast('Test request sent', { sub: 'It should ping you and appear in your inbox', action: { label: 'Open', fn: () => go('inbox') } });
       } catch (err) { fail(err); }
       return undefined;
@@ -1586,7 +1586,7 @@ function connect() {
   es.addEventListener('config', async () => {
     const wasPaired = !!S.config?.telegram?.paired;
     await loadConfig().catch(() => {});
-    if (!wasPaired && S.config?.telegram?.paired) toast('Telegram connected', { sub: 'Doorman will message you there when an agent needs you', ms: 6000 });
+    if (!wasPaired && S.config?.telegram?.paired) toast('Telegram connected', { sub: 'Switchboard will message you there when an agent needs you', ms: 6000 });
     scheduleRender();
   });
   es.addEventListener('agents', () => refreshSoon());

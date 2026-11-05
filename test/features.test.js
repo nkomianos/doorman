@@ -8,7 +8,7 @@ import { after, before, describe, test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { categorize } from '../src/activity.js';
-import { DoormanClient } from '../src/client.js';
+import { SwitchboardClient } from '../src/client.js';
 import { startDaemon } from '../src/daemon.js';
 import { listIntegrations, setIntegration } from '../src/integrations.js';
 import { Router } from '../src/router.js';
@@ -17,7 +17,7 @@ import { HumanState } from '../src/state.js';
 import { Telegram } from '../src/telegram.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tmp = (name) => mkdtempSync(join(tmpdir(), `doorman-${name}-`));
+const tmp = (name) => mkdtempSync(join(tmpdir(), `switchboard-${name}-`));
 
 describe('one-click integrations', () => {
   test('connect and disconnect Claude Code without touching other settings', () => {
@@ -31,7 +31,7 @@ describe('one-click integrations', () => {
     assert.equal(on.theme, 'dark');
     assert.equal(on.hooks.Stop.length, 2, 'your own Stop hook is kept');
     assert.ok(on.hooks.PermissionRequest[0].hooks[0].command.includes('hook claude-code'));
-    assert.ok(existsSync(`${file}.doorman-bak`));
+    assert.ok(existsSync(`${file}.switchboard-bak`));
     setIntegration('claude-code', true, { home }); // idempotent
     assert.equal(JSON.parse(readFileSync(file, 'utf8')).hooks.Stop.length, 2);
     setIntegration('claude-code', false, { home });
@@ -47,10 +47,10 @@ describe('one-click integrations', () => {
     setIntegration('codex', true, { home });
     const text = readFileSync(file, 'utf8');
     assert.ok(text.indexOf('notify =') < text.indexOf('[profiles.fast]'));
-    assert.ok(text.includes('[mcp_servers.doorman]'));
+    assert.ok(text.includes('[mcp_servers.switchboard]'));
     assert.equal(listIntegrations({ home }).find((i) => i.id === 'codex').connected, true);
     setIntegration('codex', false, { home });
-    assert.ok(!readFileSync(file, 'utf8').includes('doorman'));
+    assert.ok(!readFileSync(file, 'utf8').includes('switchboard'));
 
     writeFileSync(file, 'notify = ["my-notifier"]\n');
     const r = setIntegration('codex', true, { home });
@@ -65,7 +65,7 @@ describe('one-click integrations', () => {
     setIntegration('openclaw', true, { home });
     const oc = JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8'));
     assert.equal(oc.agents.default, 'main');
-    assert.ok(oc.mcp.servers.files && oc.mcp.servers.doorman.args.includes('mcp'));
+    assert.ok(oc.mcp.servers.files && oc.mcp.servers.switchboard.args.includes('mcp'));
     setIntegration('openclaw', false, { home });
     assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8')).mcp.servers), ['files']);
 
@@ -73,7 +73,7 @@ describe('one-click integrations', () => {
     setIntegration('muse-code', true, { home });
     const muse = JSON.parse(readFileSync(join(home, '.config', 'muse', 'settings.json'), 'utf8'));
     assert.equal(muse.schema_version, 1);
-    assert.equal(muse.mcp_servers.doorman.mode, 'optional');
+    assert.equal(muse.mcp_servers.switchboard.mode, 'optional');
   });
 
   test('Hermes: adds and removes only its own YAML block, matching your indentation', () => {
@@ -84,7 +84,7 @@ describe('one-click integrations', () => {
     writeFileSync(file, original);
     setIntegration('hermes', true, { home });
     const text = readFileSync(file, 'utf8');
-    assert.match(text, /mcp_servers:\n {4}doorman:\n {8}command: "node"/);
+    assert.match(text, /mcp_servers:\n {4}switchboard:\n {8}command: "node"/);
     assert.ok(text.includes('    github:') && text.includes('memory:'));
     assert.equal(listIntegrations({ home }).find((i) => i.id === 'hermes').connected, true);
     setIntegration('hermes', false, { home });
@@ -92,7 +92,7 @@ describe('one-click integrations', () => {
 
     writeFileSync(file, 'model: hermes-4\n');
     setIntegration('hermes', true, { home });
-    assert.match(readFileSync(file, 'utf8'), /^model: hermes-4\n\nmcp_servers:\n {2}doorman:/);
+    assert.match(readFileSync(file, 'utf8'), /^model: hermes-4\n\nmcp_servers:\n {2}switchboard:/);
   });
 
   test('a broken JSON config is refused, not overwritten', () => {
@@ -189,14 +189,14 @@ describe('agent keys (live daemon)', () => {
   let owner;
   before(async () => {
     d = await startDaemon({ home: tmp('feat'), port: 0, overrides: { desktop: false, noProtocol: true, bundleWindowMs: 100, digest: { times: [], onBreak: true } }, log: () => {}, quiet: true, tickMs: 50 });
-    owner = new DoormanClient({ url: d.url, token: d.token });
+    owner = new SwitchboardClient({ url: d.url, token: d.token });
   });
   after(() => d.close());
 
   test('an agent key can ask and wait, but not answer, read the inbox, or pose as another agent', async () => {
     const k = await owner.request('POST', '/v1/keys', { name: 'Nightly backup' });
-    assert.match(k.key, /^dk_/);
-    const agent = new DoormanClient({ url: d.url, token: k.key });
+    assert.match(k.key, /^sbk_/);
+    const agent = new SwitchboardClient({ url: d.url, token: k.key });
     const r = await agent.submit({ agent: { id: 'claude-code-prod', name: 'Totally Claude' }, question: 'Upload 12 GB?', options: ['Upload', 'Skip'] });
     const full = (await owner.request('GET', `/v1/asks/${r.id}`)).ask;
     assert.equal(full.agent.id, k.agent_id, 'attributed to the key, not the claimed id');
@@ -261,7 +261,7 @@ describe('Telegram bot', () => {
         const method = req.url.split('/').pop();
         const b = body ? JSON.parse(body) : {};
         const ok = (result) => res.end(JSON.stringify({ ok: true, result }));
-        if (method === 'getMe') return ok({ id: 1, username: 'doorman_test_bot' });
+        if (method === 'getMe') return ok({ id: 1, username: 'switchboard_test_bot' });
         if (method === 'getUpdates') {
           for (let i = 0; i < 20 && !updates.length; i++) await sleep(25);
           return ok(updates.splice(0));
@@ -282,7 +282,7 @@ describe('Telegram bot', () => {
     });
     try {
       await tg.start();
-      assert.equal(tg.me.username, 'doorman_test_bot');
+      assert.equal(tg.me.username, 'switchboard_test_bot');
       updates.push({ update_id: 1, message: { chat: { id: 99, type: 'private' }, from: { id: 7 }, text: '/start 000000' } });
       await sleep(150);
       assert.equal(paired, null, 'wrong code');

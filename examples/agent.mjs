@@ -1,14 +1,14 @@
 // A minimal agent that asks before doing something it can't undo.
 //   node examples/agent.mjs
-import { DoormanClient } from '../src/client.js';
+import { SwitchboardClient } from '../src/client.js';
 
-const doorman = new DoormanClient({ agent: { id: 'invoice-bot', name: 'Invoice bot' } });
+const switchboard = new SwitchboardClient({ agent: { id: 'invoice-bot', name: 'Invoice bot' } });
 
 // Check first: no point starting a task that needs you if you're in deep work.
-const state = await doorman.state();
+const state = await switchboard.state();
 console.log(`Human is ${state.mode}; interrupts for ${state.interruptible_for}+`);
 
-const result = await doorman.ask({
+const result = await switchboard.ask({
   question: 'Pay the €1,240 invoice from Acme Hosting?',
   options: [
     { id: 'pay', label: 'Pay now', style: 'primary', consequence: 'Bank transfer today, can\'t be recalled' },
@@ -26,4 +26,4 @@ const result = await doorman.ask({
 
 console.log(`Decision: ${result.answer?.label ?? result.status} (by ${result.answer?.by ?? 'nobody'})`);
 
-await doorman.notify(result.answer?.option === 'pay' ? 'Paid INV-2291' : 'Holding INV-2291 until Friday', { urgency: 'low' });
+await switchboard.notify(result.answer?.option === 'pay' ? 'Paid INV-2291' : 'Holding INV-2291 until Friday', { urgency: 'low' });

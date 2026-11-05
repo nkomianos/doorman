@@ -25,7 +25,7 @@ export class AgentKeys {
   create({ name, agentId } = {}) {
     const label = String(name || '').trim();
     if (!label) throw Object.assign(new Error('give the key a name, e.g. "Nightly backup"'), { status: 400 });
-    const key = `dk_${randomToken().replace(/[^A-Za-z0-9]/g, '').slice(0, 32)}`;
+    const key = `sbk_${randomToken().replace(/[^A-Za-z0-9]/g, '').slice(0, 32)}`;
     const rec = { id: newId('key'), name: label, agent_id: agentId ? String(agentId) : `key-${slug(label)}`, prefix: key.slice(0, 7), hash: hash(key), created_at: Date.now(), last_used: null };
     this.keys.push(rec);
     this._save();
@@ -43,7 +43,7 @@ export class AgentKeys {
 
   /** The key record for a presented secret, or null. */
   check(given) {
-    if (!given || !given.startsWith('dk_')) return null;
+    if (!given || !given.startsWith('sbk_')) return null;
     const h = Buffer.from(hash(given));
     const rec = this.keys.find((k) => {
       const b = Buffer.from(k.hash);

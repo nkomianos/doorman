@@ -10,7 +10,7 @@ import { ActivitySensor } from './activity.js';
 import { Ntfy, compose, desktopNotify, signAction, verifyAction } from './notify.js';
 import { Router } from './router.js';
 import { Rules } from './rules.js';
-import { DoormanClient } from './client.js';
+import { SwitchboardClient } from './client.js';
 import { SCRIPT, runDemo } from './demo.js';
 import { expandEvents, parseIcs } from './ics.js';
 import { listIntegrations, setIntegration } from './integrations.js';
@@ -42,13 +42,13 @@ function outcomeLine(a) {
   }
 }
 
-// The exact command to run this copy of doorman, for copy-paste setup instructions in the inbox.
-const BIN = fileURLToPath(new URL('../bin/doorman.js', import.meta.url));
+// The exact command to run this copy of switchboard, for copy-paste setup instructions in the inbox.
+const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
 const CLI = `node "${BIN}"`;
 // Where agents keep their config and logs (your home folder). Overridable for demos and tests.
-const AGENT_HOME = () => process.env.DOORMAN_AGENT_HOME || undefined;
+const AGENT_HOME = () => process.env.SWITCHBOARD_AGENT_HOME || undefined;
 
-export async function startDaemon({ home, port, overrides = {}, log = (m) => console.error(`[doorman] ${m}`), tickMs = 250, quiet = false } = {}) {
+export async function startDaemon({ home, port, overrides = {}, log = (m) => console.error(`[switchboard] ${m}`), tickMs = 250, quiet = false } = {}) {
   const p = ensureHome(home);
   const config = loadConfig(p.home, overrides);
   if (port != null) config.port = port;
@@ -168,13 +168,13 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   startSensor();
 
   const baseUrl = () => `http://127.0.0.1:${config.port}`;
-  const iconPath = join(p.home, 'doorman-icon-2.png'); // bump the name when the icon design changes
-  // Answer buttons on Windows notifications, via a per-user doorman:// handler.
+  const iconPath = join(p.home, 'switchboard-icon-1.png'); // bump the name when the icon design changes
+  // Answer buttons on Windows notifications, via a per-user switchboard:// handler.
   let protocolReady = false;
   if (process.platform === 'win32' && !config.noProtocol) {
     registerProtocol(p.home).then((ok) => {
       protocolReady = ok;
-      if (!ok) log('could not register doorman:// links, so notification buttons are off');
+      if (!ok) log('could not register switchboard:// links, so notification buttons are off');
     });
   }
   const desktopActions = (c) => {
@@ -243,7 +243,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     return getConfig();
   };
   const notifyTest = async () => {
-    const c = { title: 'Doorman test', body: 'If you can see this, interruptions reach you here.', url: `${baseUrl()}/`, single: null, urgency: 'normal' };
+    const c = { title: 'Switchboard test', body: 'If you can see this, interruptions reach you here.', url: `${baseUrl()}/`, single: null, urgency: 'normal' };
     const sent = [];
     const errors = {};
     if (config.desktop) {
@@ -258,7 +258,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     }
     if (telegram?.paired) {
       try {
-        await telegram.send('🔔 <b>Doorman test</b>\nIf you can see this, Doorman can reach your phone.');
+        await telegram.send('🔔 <b>Switchboard test</b>\nIf you can see this, Switchboard can reach your phone.');
         sent.push('Telegram');
       } catch (err) { errors.telegram = err.message; }
     }
@@ -321,12 +321,12 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     return closing;
   };
 
-  // "Try it with sample agents" in the inbox runs the same script as `doorman demo`.
+  // "Try it with sample agents" in the inbox runs the same script as `switchboard demo`.
   let demoRunning = false;
   const startDemo = () => {
     if (demoRunning) return { started: false, reason: 'already running' };
     demoRunning = true;
-    const client = new DoormanClient({ url: baseUrl(), token, autostart: false });
+    const client = new SwitchboardClient({ url: baseUrl(), token, autostart: false });
     runDemo({ client, log: () => {} })
       .catch((err) => log(`demo failed: ${err.message}`))
       .finally(() => { demoRunning = false; });
@@ -336,7 +336,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   // MCP over HTTP: one stateless MCP server per request, calling back into this daemon
   // with the caller's own credential, so an agent key stays scoped to its agent.
   const mcpHttp = async (req, res, who, credential) => {
-    const client = new DoormanClient({ url: baseUrl(), token: credential, autostart: false });
+    const client = new SwitchboardClient({ url: baseUrl(), token: credential, autostart: false });
     // Tunnels cut long requests (Cloudflare at ~100s), so ask_human returns a pending id sooner.
     const mcp = buildMcpServer({ client, defaultWaitSeconds: 50, maxWaitSeconds: 90 });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

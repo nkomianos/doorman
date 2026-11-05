@@ -32,21 +32,21 @@ export function compose(n, baseUrl, now = Date.now()) {
 
 const xml = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
 
-// Windows only shows toasts from a registered app id. Registering "Doorman" under HKCU
+// Windows only shows toasts from a registered app id. Registering "Switchboard" under HKCU
 // (no admin, no installer) makes it appear as its own app in Settings > Notifications,
 // instead of borrowing PowerShell's id, whose banners Windows often hides.
-const WIN_APP_ID = 'Doorman';
+const WIN_APP_ID = 'Switchboard';
 const psq = (s) => String(s).replace(/'/g, "''");
 function windowsToastScript({ title, body, url, urgency }, icon, actions = []) {
   const scenario = urgency === 'critical' ? ' scenario="urgent"' : '';
-  // Up to 4 answer buttons (doorman:// links), then "Open inbox". Windows allows 5.
+  // Up to 4 answer buttons (switchboard:// links), then "Open inbox". Windows allows 5.
   const buttons = [...actions.slice(0, 4).map((a) => ({ label: a.label, url: a.url })), { label: actions.length ? 'Open' : 'Open inbox', url }];
   const toast = `<toast activationType="protocol" launch="${xml(url)}"${scenario}><visual><binding template="ToastGeneric"><text>${xml(title)}</text><text>${xml(body)}</text></binding></visual><actions>${buttons.map((b) => `<action content="${xml(b.label)}" activationType="protocol" arguments="${xml(b.url)}"/>`).join('')}</actions></toast>`;
   return [
     "$ErrorActionPreference = 'Stop'",
     `$key = 'HKCU:\\Software\\Classes\\AppUserModelId\\${WIN_APP_ID}'`,
     'if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }',
-    "Set-ItemProperty -Path $key -Name DisplayName -Value 'Doorman'",
+    "Set-ItemProperty -Path $key -Name DisplayName -Value 'Switchboard'",
     icon ? `$icon = '${psq(icon)}'` : '$icon = $null',
     'if ($icon -and -not (Test-Path $icon)) {',
     '  try {',
@@ -55,10 +55,14 @@ function windowsToastScript({ title, body, url, urgency }, icon, actions = []) {
     '    $g = [System.Drawing.Graphics]::FromImage($b)',
     "    $g.SmoothingMode = 'AntiAlias'",
     '    $g.Clear([System.Drawing.Color]::FromArgb(255, 79, 70, 229))',
-    '    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 9',
-    '    $g.DrawRectangle($pen, 40, 24, 48, 80)',
-    '    $g.DrawLine($pen, 22, 104, 106, 104)',
-    '    $g.FillEllipse([System.Drawing.Brushes]::White, 70, 60, 11, 11)',
+    // The logo: three lines patched into one (many agents, one you).
+    '    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 8',
+    "    $pen.StartCap = 'Round'; $pen.EndCap = 'Round'",
+    '    $g.DrawBezier($pen, 36, 38, 64, 38, 64, 64, 92, 64)',
+    '    $g.DrawLine($pen, 36, 64, 92, 64)',
+    '    $g.DrawBezier($pen, 36, 90, 64, 90, 64, 64, 92, 64)',
+    '    foreach ($y in 38, 64, 90) { $g.FillEllipse([System.Drawing.Brushes]::White, 26, $y - 10, 20, 20) }',
+    '    $g.FillEllipse([System.Drawing.Brushes]::White, 79, 51, 26, 26)',
     '    $b.Save($icon, [System.Drawing.Imaging.ImageFormat]::Png)',
     '  } catch { $icon = $null }',
     '}',
@@ -82,9 +86,9 @@ export function desktopNotify({ title, body, url, urgency }, { icon = null, acti
         child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
       } else if (process.platform === 'darwin') {
         const q = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        child = spawn('osascript', ['-e', `display notification "${q(body)}" with title "Doorman" subtitle "${q(title)}"`], { stdio: ['ignore', 'ignore', 'pipe'] });
+        child = spawn('osascript', ['-e', `display notification "${q(body)}" with title "Switchboard" subtitle "${q(title)}"`], { stdio: ['ignore', 'ignore', 'pipe'] });
       } else {
-        child = spawn('notify-send', ['--app-name=Doorman', title, body], { stdio: ['ignore', 'ignore', 'pipe'] });
+        child = spawn('notify-send', ['--app-name=Switchboard', title, body], { stdio: ['ignore', 'ignore', 'pipe'] });
       }
       let err = '';
       child.stderr.on('data', (d) => { err += d; });
@@ -152,8 +156,8 @@ export class Ntfy {
   message(n, c) {
     const msg = {
       topic: this.topic,
-      title: this.redact ? (c.single ? c.single.agent.name : 'Doorman') : c.title,
-      message: this.redact ? (c.single ? 'Needs a decision. Open Doorman to see it.' : `${n.asks.length} items need you.`) : c.body,
+      title: this.redact ? (c.single ? c.single.agent.name : 'Switchboard') : c.title,
+      message: this.redact ? (c.single ? 'Needs a decision. Open Switchboard to see it.' : `${n.asks.length} items need you.`) : c.body,
       priority: NTFY_PRIORITY[c.urgency] ?? 3,
       tags: ['bellhop_bell'],
     };

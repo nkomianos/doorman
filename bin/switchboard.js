@@ -3,41 +3,41 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DoormanClient } from '../src/client.js';
-import { VERSION, doormanHome, ensureHome, loadConfig, paths } from '../src/config.js';
+import { SwitchboardClient } from '../src/client.js';
+import { VERSION, switchboardHome, ensureHome, loadConfig, paths } from '../src/config.js';
 import { Ledger } from '../src/ledger.js';
 import { fmtDuration } from '../src/util.js';
 
 const BIN = fileURLToPath(import.meta.url);
 
-const HELP = `doorman ${VERSION}: the attention layer for your AI agents
+const HELP = `switchboard ${VERSION}: the attention layer for your AI agents
 
 Daemon
-  doorman start [--port 7777] [--detach]   Run the router (inbox at http://127.0.0.1:7777)
-  doorman stop                             Stop a running daemon
-  doorman status                           Your state, what's waiting, agent budgets
-  doorman open                             Open the inbox in your browser
+  switchboard start [--port 7777] [--detach]   Run the router (inbox at http://127.0.0.1:7777)
+  switchboard stop                             Stop a running daemon
+  switchboard status                           Your state, what's waiting, agent budgets
+  switchboard open                             Open the inbox in your browser
 
 You
-  doorman focus <available|focus|dnd|away|auto> [--for 90m]
-  doorman digest                           Deliver the digest now
-  doorman rules [list | add ... | rm <id>]
-  doorman ledger [tail [-n 20] | verify | export]
+  switchboard focus <available|focus|dnd|away|auto> [--for 90m]
+  switchboard digest                           Deliver the digest now
+  switchboard rules [list | add ... | rm <id>]
+  switchboard ledger [tail [-n 20] | verify | export]
 
 Agents
-  doorman ask "Question?" -o Yes -o No [--urgency high] [--deadline 10m] [--default No]
+  switchboard ask "Question?" -o Yes -o No [--urgency high] [--deadline 10m] [--default No]
                                            Blocks, prints the answer (scriptable)
-  doorman notify "Message" [--urgency low]
-  doorman mcp                              MCP server: ask_human, notify_human, get_human_state
-  doorman proxy [--name x] [--gate "delete_*"] -- <mcp server command...>
+  switchboard notify "Message" [--urgency low]
+  switchboard mcp                              MCP server: ask_human, notify_human, get_human_state
+  switchboard proxy [--name x] [--gate "delete_*"] -- <mcp server command...>
                                            Route a server's elicitations + gate its tools
-  doorman hook claude-code                 Claude Code hook (PermissionRequest, Notification, Stop)
-  doorman hook codex '<json>'              Codex notify program
-  doorman setup [agent] [--write|--remove]   Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes, Muse Code
-  doorman tunnel                           Let cloud agents (Grok, the Muse app) reach you via /mcp
-  doorman demo [--speed 1]                 Three agents need you at once
+  switchboard hook claude-code                 Claude Code hook (PermissionRequest, Notification, Stop)
+  switchboard hook codex '<json>'              Codex notify program
+  switchboard setup [agent] [--write|--remove]   Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes, Muse Code
+  switchboard tunnel                           Let cloud agents (Grok, the Muse app) reach you via /mcp
+  switchboard demo [--speed 1]                 Three agents need you at once
 
-Env: DOORMAN_HOME (default ~/.doorman), DOORMAN_URL, DOORMAN_AGENT, DOORMAN_AGENT_NAME`;
+Env: SWITCHBOARD_HOME (default ~/.switchboard), SWITCHBOARD_URL, SWITCHBOARD_AGENT, SWITCHBOARD_AGENT_NAME`;
 
 function parseArgs(argv, aliases = {}) {
   const out = { _: [], flags: {} };
@@ -60,7 +60,7 @@ function parseArgs(argv, aliases = {}) {
   return out;
 }
 const list = (v) => (v == null ? [] : [].concat(v));
-const die = (msg, code = 1) => { console.error(`doorman: ${msg}`); process.exit(code); };
+const die = (msg, code = 1) => { console.error(`switchboard: ${msg}`); process.exit(code); };
 
 function openBrowser(url) {
   const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
@@ -69,9 +69,9 @@ function openBrowser(url) {
 
 async function cmdStart(args) {
   const port = args.flags.port ? Number(args.flags.port) : undefined;
-  const client = new DoormanClient({ autostart: false, url: port ? `http://127.0.0.1:${port}` : undefined });
+  const client = new SwitchboardClient({ autostart: false, url: port ? `http://127.0.0.1:${port}` : undefined });
   if (await client.health()) {
-    if (!args.flags['background-child']) console.log(`doorman is already running at ${client.url}`);
+    if (!args.flags['background-child']) console.log(`switchboard is already running at ${client.url}`);
     return;
   }
   const p = ensureHome();
@@ -81,37 +81,37 @@ async function cmdStart(args) {
     child.unref();
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 150));
-      const c = new DoormanClient({ autostart: false });
-      if (await c.health()) { console.log(`doorman running in the background at ${c.url}  (logs: ${p.log})`); return; }
+      const c = new SwitchboardClient({ autostart: false });
+      if (await c.health()) { console.log(`switchboard running in the background at ${c.url}  (logs: ${p.log})`); return; }
     }
     die(`daemon did not start; see ${p.log}`);
   }
   const { startDaemon } = await import('../src/daemon.js');
   const bg = !!args.flags['background-child'];
-  const log = bg ? (m) => { try { appendFileSync(p.log, `${new Date().toISOString()} ${m}\n`); } catch { /* ignore */ } } : (m) => console.error(`[doorman] ${m}`);
+  const log = bg ? (m) => { try { appendFileSync(p.log, `${new Date().toISOString()} ${m}\n`); } catch { /* ignore */ } } : (m) => console.error(`[switchboard] ${m}`);
   let d;
   try {
     d = await startDaemon({ port, log });
   } catch (err) {
-    if (err.code === 'EADDRINUSE') die(`port ${port ?? loadConfig().port} is in use (another doorman? try: doorman status)`);
+    if (err.code === 'EADDRINUSE') die(`port ${port ?? loadConfig().port} is in use (another switchboard? try: switchboard status)`);
     throw err;
   }
   const shutdown = () => d.close().then(() => process.exit(0));
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   if (!bg) {
-    console.log(`\n  doorman ${VERSION} is watching the door.\n\n  Inbox   ${d.url}/\n  Home    ${d.home}\n  State   ${d.router.state.current().label}\n\n  Try:    doorman demo        (in another terminal)\n          doorman setup claude-code\n`);
+    console.log(`\n  switchboard ${VERSION} is on the line.\n\n  Inbox   ${d.url}/\n  Home    ${d.home}\n  State   ${d.router.state.current().label}\n\n  Try:    switchboard demo        (in another terminal)\n          switchboard setup claude-code\n`);
     if (args.flags.open) openBrowser(`${d.url}/`);
   }
 }
 
 async function cmdStatus() {
-  const c = new DoormanClient({ autostart: false });
-  if (!(await c.health())) return die('not running. Start it with: doorman start', 1);
+  const c = new SwitchboardClient({ autostart: false });
+  if (!(await c.health())) return die('not running. Start it with: switchboard start', 1);
   const st = await c.request('GET', '/v1/state?detail=1');
   const { counts, stats } = await c.request('GET', '/v1/stats');
   const { agents } = await c.request('GET', '/v1/agents');
-  console.log(`doorman at ${c.url}`);
+  console.log(`switchboard at ${c.url}`);
   console.log(`  You:      ${st.label}${st.until ? ` until ${new Date(st.until).toLocaleTimeString()}` : ''} (${st.source})`);
   console.log(`  Waiting:  ${counts.needs_you} need you, ${counts.fyi} FYI, ${counts.held} held, ${counts.digest} for digest`);
   console.log(`  Totals:   ${stats.asks} asks → ${stats.notifications} interruptions (${stats.digests} digests), ${stats.auto} auto-answered`);
@@ -125,11 +125,11 @@ async function cmdStatus() {
 
 async function cmdAsk(args) {
   const question = args._.join(' ');
-  if (!question) die('usage: doorman ask "Question?" -o Yes -o No');
+  if (!question) die('usage: switchboard ask "Question?" -o Yes -o No');
   const options = list(args.flags.option);
   const input = {
     question,
-    agent: args.flags.agent ? String(args.flags.agent) : process.env.DOORMAN_AGENT ? undefined : { id: 'cli', name: 'Terminal' },
+    agent: args.flags.agent ? String(args.flags.agent) : process.env.SWITCHBOARD_AGENT ? undefined : { id: 'cli', name: 'Terminal' },
     urgency: args.flags.urgency,
     deadline: args.flags.deadline,
     default: args.flags.default,
@@ -140,7 +140,7 @@ async function cmdAsk(args) {
   };
   if (options.length) input.options = options.map(String);
   else input.input = { type: 'text' };
-  const c = new DoormanClient();
+  const c = new SwitchboardClient();
   const timeoutMs = args.flags.timeout ? Number(String(args.flags.timeout).replace(/s$/, '')) * 1000 : Infinity;
   const v = await c.ask(input, { timeoutMs });
   if (args.flags.json) console.log(JSON.stringify(v, null, 2));
@@ -149,7 +149,7 @@ async function cmdAsk(args) {
 }
 
 async function cmdRules(args) {
-  const c = new DoormanClient();
+  const c = new SwitchboardClient();
   const sub = args._[0] || 'list';
   if (sub === 'list') {
     const { rules, suggestions } = await c.request('GET', '/v1/rules');
@@ -165,11 +165,11 @@ async function cmdRules(args) {
   } else if (sub === 'rm') {
     await c.request('DELETE', `/v1/rules/${args._[1]}`);
     console.log('removed');
-  } else die('usage: doorman rules [list | add --agent X --fingerprint "Bash:npm test*" --answer allow | rm <id>]');
+  } else die('usage: switchboard rules [list | add --agent X --fingerprint "Bash:npm test*" --answer allow | rm <id>]');
 }
 
 function cmdLedger(args) {
-  const p = paths(doormanHome());
+  const p = paths(switchboardHome());
   const sub = args._[0] || 'tail';
   if (sub === 'verify') {
     const r = Ledger.verifyFile(p.ledger);
@@ -191,16 +191,16 @@ function cmdLedger(args) {
 async function cmdHook(args) {
   const which = args._[0];
   const { runClaudeHook, codexInform } = await import('../src/hooks.js');
-  const c = new DoormanClient();
+  const c = new SwitchboardClient();
   if (which === 'codex') {
     const raw = args._[1] || args.rest?.[0];
     try {
       const inform = codexInform(JSON.parse(raw));
       if (inform) await c.submit(inform);
-    } catch (err) { console.error(`doorman hook codex: ${err.message}`); }
+    } catch (err) { console.error(`switchboard hook codex: ${err.message}`); }
     return;
   }
-  if (which !== 'claude-code') die('usage: doorman hook <claude-code|codex>');
+  if (which !== 'claude-code') die('usage: switchboard hook <claude-code|codex>');
   // Hooks must never break the agent: any failure means "no opinion".
   let pending = null;
   const cancel = () => {
@@ -214,12 +214,12 @@ async function cmdHook(args) {
     let raw = '';
     for await (const chunk of process.stdin) raw += chunk;
     const payload = JSON.parse(raw);
-    const wait = Number(process.env.DOORMAN_HOOK_WAIT) || loadConfig().hookWaitSeconds || 600;
+    const wait = Number(process.env.SWITCHBOARD_HOOK_WAIT) || loadConfig().hookWaitSeconds || 600;
     const out = await runClaudeHook(payload, { client: c, waitSeconds: wait, onCreated: (id) => { pending = id; } });
     pending = null;
     if (out) process.stdout.write(JSON.stringify(out));
   } catch (err) {
-    console.error(`doorman: ${err.message}`);
+    console.error(`switchboard: ${err.message}`);
   }
   // Let the process end on its own: process.exit() while the stdin pipe is
   // closing trips a libuv assertion on Windows.
@@ -236,21 +236,21 @@ async function cmdSetup(args) {
   const which = args._[0];
   if (!which) {
     console.log('Agents on this computer:\n');
-    for (const i of all) console.log(`  ${i.connected ? '●' : i.detected ? '○' : '·'} ${i.name.padEnd(15)} ${i.connected ? 'connected' : i.detected ? 'installed, not connected' : 'not found'}   doorman setup ${i.id} --write`);
+    for (const i of all) console.log(`  ${i.connected ? '●' : i.detected ? '○' : '·'} ${i.name.padEnd(15)} ${i.connected ? 'connected' : i.detected ? 'installed, not connected' : 'not found'}   switchboard setup ${i.id} --write`);
     console.log('\nOr open the inbox: Connect → one click per agent.');
     return;
   }
   const i = all.find((x) => x.id === which);
-  if (!i) die(`usage: doorman setup <${all.map((x) => x.id).join('|')}> [--write | --remove]`);
+  if (!i) die(`usage: switchboard setup <${all.map((x) => x.id).join('|')}> [--write | --remove]`);
   if (args.flags.write || args.flags.remove) {
     console.log(setIntegration(which, !args.flags.remove, opts).message);
   } else {
-    console.log(`Add to ${i.file} (or run: doorman setup ${which} --write):\n`);
+    console.log(`Add to ${i.file} (or run: switchboard setup ${which} --write):\n`);
     console.log(i.snippet);
   }
   if (which === 'claude-code') {
     console.log('\nOptional: give Claude an ask_human tool for questions mid-task:\n');
-    console.log(`   claude mcp add doorman -- node "${BIN}" mcp\n`);
+    console.log(`   claude mcp add switchboard -- node "${BIN}" mcp\n`);
     console.log('Gate risky tools on any MCP server by wrapping it:\n');
     console.log(`   claude mcp add github -- node "${BIN}" proxy --name github --gate "create_*|delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github\n`);
   }
@@ -262,12 +262,12 @@ async function cmdSetup(args) {
  * agent key; the inbox and your owner token stay local. Ctrl-C turns it off again.
  */
 async function cmdTunnel() {
-  const c = new DoormanClient();
-  if (!(await c.ensure())) die('could not reach or start the doorman daemon');
+  const c = new SwitchboardClient();
+  if (!(await c.ensure())) die('could not reach or start the switchboard daemon');
   const port = new URL(c.url).port || '7777';
   const proc = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   proc.on('error', () => die([
-    'cloudflared is not installed. It makes a free, temporary public URL for Doorman:',
+    'cloudflared is not installed. It makes a free, temporary public URL for Switchboard:',
     '  Windows:  winget install --id Cloudflare.cloudflared',
     '  macOS:    brew install cloudflared',
     '  Linux:    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/',
@@ -279,7 +279,7 @@ async function cmdTunnel() {
     if (!m || url) return;
     url = m[0];
     await c.request('PATCH', '/v1/config', { remote: { enabled: true, url } });
-    console.log(`\n  Cloud agents can now reach Doorman.\n\n  MCP URL:  ${url}/mcp?key=<agent key>\n\n  1. Create an agent key in the inbox: Connect → Any other agent.\n  2. In Grok: grok.com/connectors → New connector → Custom → paste the MCP URL with your key.\n\n  Only agent keys work through this URL. Press Ctrl-C to close it; remote access turns off.\n  (Quick-tunnel URLs change each time, so update the connector if you restart.)\n`);
+    console.log(`\n  Cloud agents can now reach Switchboard.\n\n  MCP URL:  ${url}/mcp?key=<agent key>\n\n  1. Create an agent key in the inbox: Connect → Any other agent.\n  2. In Grok: grok.com/connectors → New connector → Custom → paste the MCP URL with your key.\n\n  Only agent keys work through this URL. Press Ctrl-C to close it; remote access turns off.\n  (Quick-tunnel URLs change each time, so update the connector if you restart.)\n`);
   };
   proc.stdout.on('data', onData);
   proc.stderr.on('data', onData);
@@ -293,12 +293,12 @@ async function cmdTunnel() {
   proc.on('exit', () => { if (url) console.log('Tunnel closed.'); });
 }
 
-/** doorman://answer?... from a Windows notification button. */
+/** switchboard://answer?... from a Windows notification button. */
 async function cmdUrl(args) {
   const { parseActionUrl } = await import('../src/winproto.js');
   const action = parseActionUrl(args._[0] || '');
   if (!action) return;
-  const c = new DoormanClient({ autostart: false });
+  const c = new SwitchboardClient({ autostart: false });
   try {
     await c.request('POST', '/v1/actions/answer', { ...action, surface: 'desktop' });
   } catch (err) {
@@ -312,35 +312,35 @@ async function main() {
   switch (cmd) {
     case 'start': return cmdStart(args);
     case 'stop': {
-      const c = new DoormanClient({ autostart: false });
-      if (!(await c.health())) return console.log('doorman is not running');
+      const c = new SwitchboardClient({ autostart: false });
+      if (!(await c.health())) return console.log('switchboard is not running');
       await c.request('POST', '/v1/shutdown');
       return console.log('stopped');
     }
     case 'status': return cmdStatus();
     case 'open': {
-      const c = new DoormanClient();
+      const c = new SwitchboardClient();
       await c.ensure();
       openBrowser(`${c.url}/`);
       return console.log(`${c.url}/`);
     }
     case 'focus':
     case 'state': {
-      const c = new DoormanClient();
+      const c = new SwitchboardClient();
       const s = args._[0]
         ? await (await c.ensure(), c.request('POST', '/v1/state', { mode: args._[0], for: args.flags.for }))
         : (await c.ensure(), await c.request('GET', '/v1/state?detail=1'));
       return console.log(`${s.label}${s.until ? ` for ${fmtDuration(s.until - Date.now())}` : ''} (${s.source}); interrupts for ${s.interruptible_for}+`);
     }
     case 'digest': {
-      const c = new DoormanClient();
+      const c = new SwitchboardClient();
       await c.ensure();
       const r = await c.request('POST', '/v1/digest');
       return console.log(r.delivered ? 'digest delivered' : 'digest is empty');
     }
     case 'ask': return cmdAsk(args);
     case 'notify': {
-      const r = await new DoormanClient().notify(args._.join(' '), { agent: args.flags.agent ? String(args.flags.agent) : { id: 'cli', name: 'Terminal' }, urgency: args.flags.urgency || 'normal' });
+      const r = await new SwitchboardClient().notify(args._.join(' '), { agent: args.flags.agent ? String(args.flags.agent) : { id: 'cli', name: 'Terminal' }, urgency: args.flags.urgency || 'normal' });
       return console.log(`${r.id}: ${r.delivery?.mode} (${r.delivery?.reason})`);
     }
     case 'rules': return cmdRules(args);
@@ -350,7 +350,7 @@ async function main() {
       return runMcpServer();
     }
     case 'proxy': {
-      if (!args.rest?.length) die('usage: doorman proxy [--name x] [--gate "pattern"] -- <command> [args...]');
+      if (!args.rest?.length) die('usage: switchboard proxy [--name x] [--gate "pattern"] -- <command> [args...]');
       const { runProxy } = await import('../src/proxy.js');
       const child = runProxy({
         command: args.rest[0],

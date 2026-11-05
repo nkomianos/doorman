@@ -185,12 +185,12 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
       // With remote access on (for cloud agents behind a tunnel), other hosts may reach
       // /mcp and the agent routes, and only with an agent key (checked below).
       const local = hostOk(req);
-      if (!local && !(remote() && (url.pathname === '/mcp' || url.pathname.startsWith('/v1/')))) throw httpError(421, 'doorman only answers on localhost');
+      if (!local && !(remote() && (url.pathname === '/mcp' || url.pathname.startsWith('/v1/')))) throw httpError(421, 'switchboard only answers on localhost');
 
-      if (req.method === 'GET' && url.pathname === '/v1/health') return send(res, 200, { ok: true, name: 'doorman', version });
+      if (req.method === 'GET' && url.pathname === '/v1/health') return send(res, 200, { ok: true, name: 'switchboard', version });
 
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        const html = (await readFile(new URL('index.html', UI_DIR), 'utf8')).replace('__DOORMAN_TOKEN__', token).replace('__DOORMAN_VERSION__', version);
+        const html = (await readFile(new URL('index.html', UI_DIR), 'utf8')).replace('__SWITCHBOARD_TOKEN__', token).replace('__SWITCHBOARD_VERSION__', version);
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
         return res.end(html);
       }
@@ -201,11 +201,11 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
       }
 
       const who = whoIs(req, url, token, keys);
-      if (!who) throw httpError(401, 'missing or bad token (use ~/.doorman/token, or an agent key from the inbox)');
+      if (!who) throw httpError(401, 'missing or bad token (use ~/.switchboard/token, or an agent key from the inbox)');
       if (!local && who.role !== 'agent') throw httpError(403, 'from outside this computer, only agent keys are accepted');
 
       // MCP over HTTP (Streamable HTTP, stateless): for agents that can't launch a local
-      // process, like Grok or other cloud agents reaching Doorman through a tunnel.
+      // process, like Grok or other cloud agents reaching Switchboard through a tunnel.
       if (url.pathname === '/mcp') {
         if (!mcpHttp) throw httpError(501, 'MCP over HTTP is not available');
         return mcpHttp(req, res, who, given(req, url));

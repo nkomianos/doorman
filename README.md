@@ -2,7 +2,7 @@
 
 <img src="ui/favicon.svg" width="72" height="72" alt="">
 
-# Doorman
+# Switchboard
 
 **The attention layer for your AI agents.**<br>
 One inbox for every agent that needs you, and one router that decides when any of them gets to interrupt you.
@@ -26,7 +26,7 @@ One inbox for every agent that needs you, and one router that decides when any o
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/inbox-dark.png">
-  <img alt="The Doorman inbox: two urgent requests that pinged you, with deadline countdowns, consequences for each option and a line explaining why each one interrupted you" src="docs/images/inbox-light.png" width="900">
+  <img alt="The Switchboard inbox: two urgent requests that pinged you, with deadline countdowns, consequences for each option and a line explaining why each one interrupted you" src="docs/images/inbox-light.png" width="900">
 </picture>
 
 </div>
@@ -35,9 +35,9 @@ One inbox for every agent that needs you, and one router that decides when any o
 
 You're going to run a lot of agents: one fixing tests, one doing email, one watching flight prices, one in your CI. Each of them has its own chat window, its own approval prompt and its own way of pinging you. Every tool on the market sits on the **sender's** side, serving one developer's agent.
 
-Doorman sits on the **receiver's** side. It's yours, across all of them, the way your spam filter is yours and not the sender's. Agents send a structured request to Doorman. Doorman puts it in your inbox right away, and only **interrupts** you when it's worth it.
+Switchboard sits on the **receiver's** side. It's yours, across all of them, the way your spam filter is yours and not the sender's. Agents send a structured request to Switchboard. Switchboard puts it in your inbox right away, and only **interrupts** you when it's worth it.
 
-> In the built-in demo, three agents send 12 requests in a few seconds. Without Doorman that's 12 pings. With Doorman it's **one**, with the two urgent ones bundled together. The rest wait quietly, go to your digest, or get answered by a rule Doorman learned from you.
+> In the built-in demo, three agents send 12 requests in a few seconds. Without Switchboard that's 12 pings. With Switchboard it's **one**, with the two urgent ones bundled together. The rest wait quietly, go to your digest, or get answered by a rule Switchboard learned from you.
 
 ## Features
 
@@ -46,7 +46,7 @@ Doorman sits on the **receiver's** side. It's yours, across all of them, the way
 | **One inbox for every agent** | Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes Agent, Muse Code, Grok and Grok Bot, the Meta Muse app, any MCP client, scripts and plain HTTP all land in the same place. |
 | **Interrupts you only when it matters** | Your status (Available, Focus, Do not disturb, Away), deadlines, safe defaults, urgency and a per-agent ping budget decide when you get pinged. Every request says **why**. |
 | **Bundles and digests** | Requests that arrive together become one notification. Low-priority updates wait for your digest or your next break. |
-| **Learns your preferences** | Answer the same way three times and Doorman offers a rule. It spots patterns too: allow `git status`, `git diff` and `git log` and it offers one rule for `Bash:git *`. It never offers to automate anything irreversible. |
+| **Learns your preferences** | Answer the same way three times and Switchboard offers a rule. It spots patterns too: allow `git status`, `git diff` and `git log` and it offers one rule for `Bash:git *`. It never offers to automate anything irreversible. |
 | **Knows when you're busy** | Connect your calendar, and optionally let it notice when you step away or join a Zoom call. That reading stays on your computer: agents only ever see “Focus” or “Available”. |
 | **See what your agents are doing** | The **Now** page shows each Claude Code and Codex session (working, waiting for you, or done) by reading the logs they already write. No setup. |
 | **Answer from anywhere** | Desktop notifications with answer buttons, plus your phone through Telegram or ntfy. One tap answers; nothing on your computer is exposed to the internet. |
@@ -56,19 +56,19 @@ Doorman sits on the **receiver's** side. It's yours, across all of them, the way
 ## Quick start
 
 ```bash
-git clone https://github.com/nkomianos/doorman && cd doorman
+git clone https://github.com/nkomianos/switchboard && cd switchboard
 npm install
-node bin/doorman.js start      # opens on http://127.0.0.1:7777
+node bin/switchboard.js start      # opens on http://127.0.0.1:7777
 ```
 
 Open **http://127.0.0.1:7777**. A first-run checklist walks you through four steps:
 
 1. **Run the demo** to see three sample agents compete for your attention.
-2. **Connect your agents**: one click each for local agents (Doorman backs up every config it edits), a tunnel for cloud agents like Grok.
+2. **Connect your agents**: one click each for local agents (Switchboard backs up every config it edits), a tunnel for cloud agents like Grok.
 3. **Set up your phone** with Telegram or ntfy.
-4. **Tell Doorman when you're busy** with a calendar link or activity sensing.
+4. **Tell Switchboard when you're busy** with a calendar link or activity sensing.
 
-Requires Node 20+. No database, no build step, no account. Run `npm link` once if you want a global `doorman` command.
+Requires Node 20+. No database, no build step, no account. Run `npm link` once if you want a global `switchboard` command.
 
 <table>
   <tr>
@@ -102,7 +102,7 @@ flowchart LR
 | **Your status** | `Available` lets normal and urgent requests through. `Focus` lets urgent ones through, `Do not disturb` only critical ones, and `Away` sends urgent ones to your phone. Set it yourself, or let your calendar, quiet hours and activity set it. |
 | **Natural breaks** | When a meeting or focus block ends, everything that waited arrives together, in one notification. |
 | **Ping budgets** | Each agent may interrupt *n* times per hour. Act on its pings and the budget grows; dismiss them and it halves, like TCP backing off under congestion. |
-| **Credibility** | Dismiss most of an agent's “urgent” requests and Doorman starts treating its urgent as normal. Crying wolf stops working. |
+| **Credibility** | Dismiss most of an agent's “urgent” requests and Switchboard starts treating its urgent as normal. Crying wolf stops working. |
 | **Deadlines & safe defaults** | A request with a safe default can wait: the default applies at the deadline. A request with *no* safe default escalates shortly before its deadline. |
 | **Snooze** | Snooze a request for 5 minutes or until tomorrow. When it comes back it pings you, even if the agent is out of budget. |
 | **Collapse keys** | A newer “build finished” replaces the unread older one, like mobile push. |
@@ -112,8 +112,8 @@ flowchart LR
 The **Connect** page detects what's installed and wires it up with one click. Prefer the terminal? Use these:
 
 ```bash
-doorman setup                       # what's installed and connected
-doorman setup claude-code --write   # or any id below  (--remove to undo)
+switchboard setup                       # what's installed and connected
+switchboard setup claude-code --write   # or any id below  (--remove to undo)
 ```
 
 | Agent | Runs | How it connects | Setup |
@@ -137,7 +137,7 @@ doorman setup claude-code --write   # or any id below  (--remove to undo)
 - **PermissionRequest**: Allow/Deny goes to your inbox and phone, and your answer goes back to Claude Code. If nobody answers in time, Claude Code shows its normal prompt.
 - **Stop**: “Finished in api: …” updates, one per session.
 - **Notification**: other “needs you” moments.
-- Optional: `claude mcp add doorman -- node /path/to/bin/doorman.js mcp` gives Claude an `ask_human` tool for questions mid-task.
+- Optional: `claude mcp add switchboard -- node /path/to/bin/switchboard.js mcp` gives Claude an `ask_human` tool for questions mid-task.
 
 Each project gets its own budget and rules (`claude-code-<project>`).
 </details>
@@ -145,17 +145,17 @@ Each project gets its own budget and rules (`claude-code-<project>`).
 <details>
 <summary><b>OpenClaw, Hermes Agent and Muse Code</b>: your always-on agents ask before they act</summary>
 
-All three speak MCP, so they get Doorman's `ask_human`, `notify_human` and `get_human_state` tools. The Connect page (or `doorman setup <id> --write`) adds the server for you. By hand:
+All three speak MCP, so they get Switchboard's `ask_human`, `notify_human` and `get_human_state` tools. The Connect page (or `switchboard setup <id> --write`) adds the server for you. By hand:
 
-- **OpenClaw**: `openclaw mcp add doorman --command node --arg /path/to/bin/doorman.js --arg mcp`, then start a new session (or `openclaw mcp reload`).
+- **OpenClaw**: `openclaw mcp add switchboard --command node --arg /path/to/bin/switchboard.js --arg mcp`, then start a new session (or `openclaw mcp reload`).
 - **Hermes Agent**: add to `~/.hermes/config.yaml`, then run `/reload-mcp` (the messaging gateway picks it up within a minute):
   ```yaml
   mcp_servers:
-    doorman:
+    switchboard:
       command: "node"
-      args: ["/path/to/bin/doorman.js", "mcp"]
+      args: ["/path/to/bin/switchboard.js", "mcp"]
   ```
-- **Muse Code**: add `doorman` under `mcp_servers` in `~/.config/muse/settings.json` with `"mode": "optional"` (so Muse still runs when Doorman is off), restart, and check with `/mcp`.
+- **Muse Code**: add `switchboard` under `mcp_servers` in `~/.config/muse/settings.json` with `"mode": "optional"` (so Muse still runs when Switchboard is off), restart, and check with `/mcp`.
 
 Tip: tell your agent in its instructions or memory to use `ask_human` before anything irreversible (sending, paying, deleting, posting) and `notify_human` for status updates, instead of messaging you directly.
 </details>
@@ -163,7 +163,7 @@ Tip: tell your agent in its instructions or memory to use `ask_human` before any
 <details>
 <summary><b>Codex, Cursor, Claude Desktop and any MCP client</b></summary>
 
-`doorman mcp` is an MCP server with four tools:
+`switchboard mcp` is an MCP server with four tools:
 
 | Tool | |
 |---|---|
@@ -172,31 +172,31 @@ Tip: tell your agent in its instructions or memory to use `ask_human` before any
 | `notify_human` | An update. Goes to the digest unless urgent, so agents can use it freely. |
 | `get_human_state` | `available` / `focus` / `dnd` / `away` and the minimum urgency that may interrupt. |
 
-For Codex, `doorman setup codex --write` also adds turn-complete updates.
+For Codex, `switchboard setup codex --write` also adds turn-complete updates.
 </details>
 
 <details>
 <summary><b>Wrap any MCP server</b>: approve risky tools, with no changes on either side</summary>
 
 ```bash
-doorman proxy --name github --gate "create_*|delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github
+switchboard proxy --name github --gate "create_*|delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github
 ```
 
 The proxy passes everything through, except that:
 - tool calls matching `--gate` wait for your Allow/Deny (deny after 10 minutes);
-- the server's **elicitation** requests (MCP's “ask the user”) come to Doorman instead. Yes/no and choice questions become one-tap decisions; anything else becomes a form.
+- the server's **elicitation** requests (MCP's “ask the user”) come to Switchboard instead. Yes/no and choice questions become one-tap decisions; anything else becomes a form.
 </details>
 
 ### Agents in the cloud
 
-Grok and Grok Bot, the Meta Muse app and other cloud agents can't reach `localhost`. Doorman gives them a private URL through a tunnel:
+Grok and Grok Bot, the Meta Muse app and other cloud agents can't reach `localhost`. Switchboard gives them a private URL through a tunnel:
 
 ```bash
-doorman tunnel        # free Cloudflare quick tunnel; needs cloudflared (winget / brew install cloudflared)
+switchboard tunnel        # free Cloudflare quick tunnel; needs cloudflared (winget / brew install cloudflared)
 ```
 
 1. Create an **agent key** on the Connect page.
-2. Run `doorman tunnel`. It prints `https://<random>.trycloudflare.com/mcp?key=<agent key>`.
+2. Run `switchboard tunnel`. It prints `https://<random>.trycloudflare.com/mcp?key=<agent key>`.
 3. **Grok / Grok Bot**: grok.com/connectors → **New connector** → **Custom** → paste the URL (paid Grok plans).
    **Meta Muse app**: it has no MCP setting yet; ask Muse to create a custom connector for that MCP server (experimental).
 
@@ -210,17 +210,17 @@ Create an **agent key** on the Connect page. A key can send requests and read yo
 
 ```bash
 curl -s "http://127.0.0.1:7777/v1/asks?wait=25s" \
-  -H "Authorization: Bearer $DOORMAN_KEY" -H "content-type: application/json" \
+  -H "Authorization: Bearer $SWITCHBOARD_KEY" -H "content-type: application/json" \
   -d '{"question":"Backup is 3x larger than usual. Upload anyway?","options":["Upload","Skip"],"default":"Skip","deadline":"30m"}'
 ```
 
 ```bash
-doorman ask "Deploy v2 to production?" -o Deploy -o Wait --default Wait --deadline 30m
+switchboard ask "Deploy v2 to production?" -o Deploy -o Wait --default Wait --deadline 30m
 # prints the answer; exit 0 answered, 1 dismissed, 2 expired
 ```
 
 ```js
-import { askHuman } from 'doorman-attention/client';
+import { askHuman } from '@nkomianos/switchboard/client';
 const r = await askHuman({ question: 'Pay the €1,240 invoice?', options: ['Pay now', 'Hold'], default: 'Hold', deadline: '2h', reversible: false });
 ```
 
@@ -229,27 +229,27 @@ More in [`examples/`](examples) and the [Ask spec](spec/ask-v0.1.md).
 
 ## On your phone
 
-Doorman is local-first, so there's no Doorman cloud. Instead it uses free apps you may already have, through **outgoing connections only**: nothing on your computer is reachable from the internet.
+Switchboard is local-first, so there's no Switchboard cloud. Instead it uses free apps you may already have, through **outgoing connections only**: nothing on your computer is reachable from the internet.
 
 | | How it works | Setup |
 |---|---|---|
 | **Telegram** (recommended) | Your own private bot sends each request with answer buttons. Reply to a message to answer a question; `/status`, `/inbox`, `/focus 1h` and `/away` work too. Messages update once a request is settled anywhere. Only the chat you paired can answer. | About a minute: create a bot with @BotFather, paste the token on the Connect page, tap Start. |
-| **ntfy** | An open-source push app with action buttons. Answers come back over a signed reply topic. | Subscribe to the secret topic Doorman generates. |
+| **ntfy** | An open-source push app with action buttons. Answers come back over a signed reply topic. | Subscribe to the secret topic Switchboard generates. |
 
 Both can hide the question text on your lock screen, and can push every ping or only when you're Away.
 
-On **Windows**, desktop notifications have answer buttons too. Doorman registers its own notification sender and a `doorman://` link handler for your user account (no admin needed). Every button is signed, so a link on a web page can't answer for you.
+On **Windows**, desktop notifications have answer buttons too. Switchboard registers its own notification sender and a `switchboard://` link handler for your user account (no admin needed). Every button is signed, so a link on a web page can't answer for you.
 
 ## Privacy and security
 
-- **Local only.** The daemon listens on `127.0.0.1`, with a Host-header check against DNS rebinding. Your inbox, rules and history live in `~/.doorman`.
+- **Local only.** The daemon listens on `127.0.0.1`, with a Host-header check against DNS rebinding. Your inbox, rules and history live in `~/.switchboard`.
 - **Agents see almost nothing.** They get your status (`available`, `focus`, `dnd`, `away`) and nothing about your calendar, your apps or other agents.
 - **Activity sensing is opt-in** and reads two things: time since your last input, and the *name* of the app in front. Never window titles, keystrokes or screenshots. It's kept in memory, never logged.
 - **Session view** only reads the tail of Claude Code and Codex logs on your computer. You can turn it off in Settings.
-- **Tokens and keys.** The owner token is in `~/.doorman/token` (mode 600). Agent keys are stored hashed and can be revoked any time.
+- **Tokens and keys.** The owner token is in `~/.switchboard/token` (mode 600). Agent keys are stored hashed and can be revoked any time.
 - **Cloud access is off by default.** When you turn it on, requests from outside this computer must use an agent key and can only reach the agent routes and `/mcp`.
 - **Signed one-tap answers.** Phone and desktop buttons carry an HMAC per request and option; forged answers are rejected.
-- **Hash-chained log.** `doorman ledger verify` detects edits and deletions.
+- **Hash-chained log.** `switchboard ledger verify` detects edits and deletions.
 - **You are the customer.** There is no way for an agent to buy priority.
 
 ## The Ask format
@@ -276,22 +276,22 @@ The part meant to outlive this implementation: **one question**, options and the
 
 - **Exact repeats**: the same answer to the same request three times → “Always answer Allow to `Bash:npm test`?”
 - **Patterns**: the same answer to three *different* requests with a common prefix → one rule for the prefix. Never if you ever answered differently.
-- **Noise**: keep marking an agent's updates “not useful” and Doorman offers to send them to your digest instead.
+- **Noise**: keep marking an agent's updates “not useful” and Switchboard offers to send them to your digest instead.
 - **Your call, always**: suggestions are never applied on their own, irreversible actions are never suggested, and every automatic answer in History has a **Stop answering this for me** button.
 
 ## CLI
 
 ```
-doorman start [--port 7777] [--detach]    doorman focus <available|focus|dnd|away|auto> [--for 90m]
-doorman stop | status | open              doorman digest
-doorman setup [agent] [--write|--remove]  doorman rules [list | add … | rm <id>]
-doorman ask "…" -o A -o B [...]           doorman ledger [tail | verify | export]
-doorman notify "…" [--urgency low]        doorman demo [--speed 2]
-doorman mcp                               doorman hook <claude-code|codex>
-doorman proxy [--gate …] -- <cmd…>         doorman tunnel
+switchboard start [--port 7777] [--detach]    switchboard focus <available|focus|dnd|away|auto> [--for 90m]
+switchboard stop | status | open              switchboard digest
+switchboard setup [agent] [--write|--remove]  switchboard rules [list | add … | rm <id>]
+switchboard ask "…" -o A -o B [...]           switchboard ledger [tail | verify | export]
+switchboard notify "…" [--urgency low]        switchboard demo [--speed 2]
+switchboard mcp                               switchboard hook <claude-code|codex>
+switchboard proxy [--gate …] -- <cmd…>         switchboard tunnel
 ```
 
-State lives in `~/.doorman` (set `DOORMAN_HOME` to change it): `config.json`, `rules.json` (hand-editable), `state.json`, `keys.json`, `ledger.jsonl`, `token`.
+State lives in `~/.switchboard` (set `SWITCHBOARD_HOME` to change it): `config.json`, `rules.json` (hand-editable), `state.json`, `keys.json`, `ledger.jsonl`, `token`.
 
 ## FAQ
 
@@ -304,19 +304,19 @@ It's a small background program with a web inbox at `http://127.0.0.1:7777`, plu
 <details>
 <summary><b>I don't see desktop notifications.</b></summary>
 
-Use **Settings → Send a test notification**. On Windows, look for **Doorman** under Settings → System → Notifications and check that Do not disturb is off; Windows files notifications silently while it's on. On macOS, allow notifications for your terminal app.
+Use **Settings → Send a test notification**. On Windows, look for **Switchboard** under Settings → System → Notifications and check that Do not disturb is off; Windows files notifications silently while it's on. On macOS, allow notifications for your terminal app.
 </details>
 
 <details>
 <summary><b>Can agents in the cloud reach it?</b></summary>
 
-Yes, through a tunnel you control: `doorman tunnel` opens one, and only agent keys work through it. See [Agents in the cloud](#agents-in-the-cloud). A hosted relay with stable URLs is on the roadmap.
+Yes, through a tunnel you control: `switchboard tunnel` opens one, and only agent keys work through it. See [Agents in the cloud](#agents-in-the-cloud). A hosted relay with stable URLs is on the roadmap.
 </details>
 
 <details>
-<summary><b>What if Doorman isn't running?</b></summary>
+<summary><b>What if Switchboard isn't running?</b></summary>
 
-Hooks fail open: Claude Code falls back to its normal prompt. The SDK and `doorman ask` start the daemon automatically if needed.
+Hooks fail open: Claude Code falls back to its normal prompt. The SDK and `switchboard ask` start the daemon automatically if needed.
 </details>
 
 ## Roadmap

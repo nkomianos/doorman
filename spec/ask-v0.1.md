@@ -1,4 +1,4 @@
-# The Ask format, `doorman.ask/0.1`
+# The Ask format, `switchboard.ask/0.1`
 
 An **ask** is the one thing an agent sends when it needs a human. It is structured so that a router can decide *when* to interrupt, and so the same ask can be shown anywhere: a desktop toast, a phone notification with buttons, a watch, a voice prompt, a digest.
 
@@ -101,9 +101,9 @@ The decision uses:
 
 ## HTTP binding
 
-The reference daemon listens on `127.0.0.1:7777`. Every `/v1` route except `/v1/health` needs `Authorization: Bearer <token>`. The owner token is in `~/.doorman/token`.
+The reference daemon listens on `127.0.0.1:7777`. Every `/v1` route except `/v1/health` needs `Authorization: Bearer <token>`. The owner token is in `~/.switchboard/token`.
 
-Agents should use an **agent key** (`dk_…`, created in the inbox or with `POST /v1/keys`) instead. An agent key may only `POST /v1/asks`, read, wait for and `DELETE` its own asks, and `GET /v1/state`. Asks made with a key are always attributed to the key's agent id, whatever `agent` says, so one agent can't spend another's budget or trigger its rules.
+Agents should use an **agent key** (`sbk_…`, created in the inbox or with `POST /v1/keys`) instead. An agent key may only `POST /v1/asks`, read, wait for and `DELETE` its own asks, and `GET /v1/state`. Asks made with a key are always attributed to the key's agent id, whatever `agent` says, so one agent can't spend another's budget or trigger its rules.
 
 | Method & path | |
 |---|---|
@@ -120,5 +120,5 @@ Other routes (`/v1/agents`, `/v1/rules`, `/v1/ledger`, `/v1/config`, …) serve 
 
 ## MCP mapping
 
-- `ask_human`, `notify_human`, `get_human_state`, `check_answer` tools (`doorman mcp`).
-- MCP `elicitation/create` requests are converted to asks by `doorman proxy`: a single boolean or enum property becomes a `decision`, a single string becomes text `input`, anything else a form; `url` mode becomes Done/Decline. The answer maps back to `{action: accept|decline|cancel, content}`.
+- `ask_human`, `notify_human`, `get_human_state`, `check_answer` tools (`switchboard mcp`).
+- MCP `elicitation/create` requests are converted to asks by `switchboard proxy`: a single boolean or enum property becomes a `decision`, a single string becomes text `input`, anything else a form; `url` mode becomes Done/Decline. The answer maps back to `{action: accept|decline|cancel, content}`.

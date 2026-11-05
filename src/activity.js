@@ -27,7 +27,7 @@ const WIN_SCRIPT = (seconds) => `
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type @"
 using System; using System.Runtime.InteropServices;
-public static class DoormanActivity {
+public static class SwitchboardActivity {
   [StructLayout(LayoutKind.Sequential)] public struct LII { public uint cbSize; public uint dwTime; }
   [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LII p);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -38,8 +38,8 @@ public static class DoormanActivity {
 "@
 while ($true) {
   $app = ''
-  try { $app = (Get-Process -Id ([DoormanActivity]::Front())).ProcessName } catch {}
-  [Console]::Out.WriteLine('{"idle_ms":' + [DoormanActivity]::Idle() + ',"app":' + (ConvertTo-Json -Compress $app) + '}')
+  try { $app = (Get-Process -Id ([SwitchboardActivity]::Front())).ProcessName } catch {}
+  [Console]::Out.WriteLine('{"idle_ms":' + [SwitchboardActivity]::Idle() + ',"app":' + (ConvertTo-Json -Compress $app) + '}')
   [Console]::Out.Flush()
   Start-Sleep -Seconds ${seconds}
 }`;

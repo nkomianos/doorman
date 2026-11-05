@@ -1,4 +1,4 @@
-// End to end: a real daemon on a random port in a temp DOORMAN_HOME, driven the way agents use it.
+// End to end: a real daemon on a random port in a temp SWITCHBOARD_HOME, driven the way agents use it.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer, request } from 'node:http';
@@ -9,10 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { DoormanClient } from '../src/client.js';
+import { SwitchboardClient } from '../src/client.js';
 import { startDaemon } from '../src/daemon.js';
 
-const BIN = fileURLToPath(new URL('../bin/doorman.js', import.meta.url));
+const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
 const FAKE = fileURLToPath(new URL('./fixtures/fake-mcp-server.js', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,10 +32,10 @@ async function nextOpenAsk(pred = () => true, timeoutMs = 8000) {
 }
 
 before(async () => {
-  const home = mkdtempSync(join(tmpdir(), 'doorman-e2e-'));
+  const home = mkdtempSync(join(tmpdir(), 'switchboard-e2e-'));
   d = await startDaemon({ home, port: 0, overrides: { desktop: false, noProtocol: true, bundleWindowMs: 150, digest: { times: [], onBreak: true } }, log: () => {}, quiet: true, tickMs: 50 });
-  c = new DoormanClient({ url: d.url, token: d.token, home });
-  env = { ...process.env, DOORMAN_HOME: home, DOORMAN_URL: d.url, DOORMAN_TOKEN: d.token };
+  c = new SwitchboardClient({ url: d.url, token: d.token, home });
+  env = { ...process.env, SWITCHBOARD_HOME: home, SWITCHBOARD_URL: d.url, SWITCHBOARD_TOKEN: d.token };
 });
 
 after(async () => {

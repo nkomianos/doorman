@@ -1,10 +1,10 @@
-// `doorman proxy -- <mcp server command>`: sits between an MCP client (Claude Code,
+// `switchboard proxy -- <mcp server command>`: sits between an MCP client (Claude Code,
 // Cursor, ...) and a stdio MCP server. Without any change to either side it:
-//   * routes the server's elicitation requests to Doorman instead of the client UI
+//   * routes the server's elicitation requests to Switchboard instead of the client UI
 //   * gates tool calls matching --gate patterns behind your approval
 // Everything else passes through byte-for-byte (one JSON-RPC message per line).
 import { spawn } from 'node:child_process';
-import { DoormanClient } from './client.js';
+import { SwitchboardClient } from './client.js';
 import { matchGlob, slug, truncate } from './util.js';
 
 function lineReader(stream, onLine) {
@@ -27,7 +27,7 @@ function summarizeArgs(args) {
   return parts.join(', ') || null;
 }
 
-/** Map an MCP elicitation/create request onto a Doorman ask, plus how to map the answer back. */
+/** Map an MCP elicitation/create request onto a Switchboard ask, plus how to map the answer back. */
 export function elicitationToAsk(params, { agent, serverName, deadline }) {
   const base = {
     agent,
@@ -106,10 +106,10 @@ export function runProxy({
   routeElicitation = true,
   gateTimeout = '10m',
   elicitTimeout = '10m',
-  client = new DoormanClient(),
+  client = new SwitchboardClient(),
   input = process.stdin,
   output = process.stdout,
-  log = (m) => process.stderr.write(`[doorman proxy] ${m}\n`),
+  log = (m) => process.stderr.write(`[switchboard proxy] ${m}\n`),
 }) {
   const serverName = name || slug(command.split(/[\\/]/).pop());
   const child = process.platform === 'win32'
@@ -143,10 +143,10 @@ export function runProxy({
       if (view.status === 'cancelled') return;
       if (view.answer?.option === 'allow') return toServer(msg);
       const why = view.status === 'answered' ? 'the human denied it' : view.status === 'auto' ? 'a rule denied it' : `no approval (${view.status})`;
-      toClient({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `Doorman blocked this call to ${tool}: ${why}. Do not retry without asking.` }], isError: true } });
+      toClient({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `Switchboard blocked this call to ${tool}: ${why}. Do not retry without asking.` }], isError: true } });
     } catch (err) {
       log(`gate failed (${err.message}); denying ${tool}`);
-      toClient({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `Doorman could not get approval for ${tool}: ${err.message}` }], isError: true } });
+      toClient({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `Switchboard could not get approval for ${tool}: ${err.message}` }], isError: true } });
     }
   }
 

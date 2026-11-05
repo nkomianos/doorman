@@ -1,10 +1,10 @@
 {
-  "name": "doorman-attention",
+  "name": "@nkomianos/switchboard",
   "version": "0.1.0",
   "description": "The receiver-side attention layer for AI agents. One local router that decides when your agents get to interrupt you.",
   "type": "module",
   "bin": {
-    "doorman": "bin/doorman.js"
+    "switchboard": "bin/switchboard.js"
   },
   "exports": {
     ".": "./src/index.js",
@@ -17,8 +17,8 @@
     "spec"
   ],
   "scripts": {
-    "start": "node bin/doorman.js start",
-    "demo": "node bin/doorman.js demo",
+    "start": "node bin/switchboard.js start",
+    "demo": "node bin/switchboard.js demo",
     "test": "node --test --test-concurrency=1 \"test/*.test.js\""
   },
   "engines": {

@@ -1,7 +1,7 @@
-// The Ask format (doorman.ask/0.1). See spec/ask-v0.1.md for the prose version.
+// The Ask format (switchboard.ask/0.1). See spec/ask-v0.1.md for the prose version.
 import { URGENCY, newId, parseWhen, slug, truncate } from './util.js';
 
-export const SPEC_VERSION = 'doorman.ask/0.1';
+export const SPEC_VERSION = 'switchboard.ask/0.1';
 export const KINDS = ['decision', 'input', 'inform'];
 export const OPEN_STATUSES = ['pending', 'unread'];
 export const OPTION_STYLES = ['default', 'primary', 'danger'];

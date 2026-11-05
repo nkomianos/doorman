@@ -92,9 +92,9 @@ export class Telegram {
           this.cfg.chatId = m.chat.id;
           this.cfg.userId = m.from?.id;
           this.hooks.onPaired?.({ chatId: m.chat.id, userId: m.from?.id, username: m.from?.username || m.from?.first_name });
-          await this.send(`✅ <b>Connected.</b> Doorman will message you here when an agent needs you.\n\nTry /status, /focus 1h, /available or /away.`);
+          await this.send(`✅ <b>Connected.</b> Switchboard will message you here when an agent needs you.\n\nTry /status, /focus 1h, /available or /away.`);
         } else {
-          await this.call('sendMessage', { chat_id: m.chat.id, text: 'Send the pairing code shown in your Doorman inbox: /start <code>' });
+          await this.call('sendMessage', { chat_id: m.chat.id, text: 'Send the pairing code shown in your Switchboard inbox: /start <code>' });
         }
         return;
       }
@@ -136,7 +136,7 @@ export class Telegram {
   _askText(a, now = Date.now()) {
     const tag = URGENCY_TAG[a.urgency];
     const head = `<b>${html(a.agent.name)}</b>${tag ? ` · ${tag}` : ''}${a.reversible === false ? ' · can’t be undone' : ''}`;
-    if (this.cfg.redact) return `${head}\nNeeds a decision. Open your Doorman inbox to see it.`;
+    if (this.cfg.redact) return `${head}\nNeeds a decision. Open your Switchboard inbox to see it.`;
     const lines = [head, html(a.question)];
     if (a.detail?.line) lines.push(`<i>${html(a.detail.line)}</i>`);
     if (a.kind === 'decision') {

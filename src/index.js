@@ -1,4 +1,4 @@
-export { DoormanClient, askHuman, notifyHuman, getHumanState } from './client.js';
+export { SwitchboardClient, askHuman, notifyHuman, getHumanState } from './client.js';
 export { Router } from './router.js';
 export { normalizeAsk, answerView, SPEC_VERSION } from './spec.js';
 export { Budgets } from './budget.js';

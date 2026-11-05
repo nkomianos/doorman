@@ -1,4 +1,4 @@
-// Intake from coding agents that don't speak Doorman: Claude Code hooks and Codex notify.
+// Intake from coding agents that don't speak Switchboard: Claude Code hooks and Codex notify.
 import { basename } from 'node:path';
 import { slug, truncate } from './util.js';
 
@@ -58,10 +58,10 @@ export function permissionOutput(view) {
   const opt = view.answer?.option;
   if (opt === 'allow') return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
   const message = view.status === 'dismissed'
-    ? 'The human dismissed this request via Doorman. Do not retry it; continue another way or ask with more context.'
+    ? 'The human dismissed this request via Switchboard. Do not retry it; continue another way or ask with more context.'
     : view.answer?.by?.startsWith('rule:')
-      ? 'Denied by one of the human\'s Doorman rules.'
-      : 'The human denied this via Doorman.';
+      ? 'Denied by one of the human\'s Switchboard rules.'
+      : 'The human denied this via Switchboard.';
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } };
 }
 
@@ -106,7 +106,7 @@ export async function runClaudeHook(payload, { client, waitSeconds = 600, signal
     onCreated?.(created.id);
     const view = await client.wait(created.id, { timeoutMs: waitSeconds * 1000, signal });
     if (!view.final) {
-      await client.cancel(created.id, 'nobody answered in Doorman; fell back to the terminal prompt').catch(() => {});
+      await client.cancel(created.id, 'nobody answered in Switchboard; fell back to the terminal prompt').catch(() => {});
       return null;
     }
     return permissionOutput(view);

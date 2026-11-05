@@ -1,12 +1,12 @@
 // One-click connect for the agents people actually run. Each integration knows
-// where its config lives, whether it's installed, whether Doorman is wired in,
-// and how to add or remove exactly Doorman's entries (with a backup first).
+// where its config lives, whether it's installed, whether Switchboard is wired in,
+// and how to add or remove exactly Switchboard's entries (with a backup first).
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const BIN = fileURLToPath(new URL('../bin/doorman.js', import.meta.url));
+export const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
 const SELF = `node "${BIN}"`;
 const MARK = 'hook claude-code';
 
@@ -14,9 +14,9 @@ const readJSONFile = (file) => {
   if (!existsSync(file)) return {};
   const text = readFileSync(file, 'utf8').trim();
   if (!text) return {};
-  try { return JSON.parse(text); } catch { throw Object.assign(new Error(`${file} isn't valid JSON, so Doorman won't touch it. Fix it or add the snippet by hand.`), { status: 409 }); }
+  try { return JSON.parse(text); } catch { throw Object.assign(new Error(`${file} isn't valid JSON, so Switchboard won't touch it. Fix it or add the snippet by hand.`), { status: 409 }); }
 };
-const backup = (file) => { if (existsSync(file)) copyFileSync(file, `${file}.doorman-bak`); };
+const backup = (file) => { if (existsSync(file)) copyFileSync(file, `${file}.switchboard-bak`); };
 const writeFile = (file, text) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); };
 
 function claudeDesktopConfig(home) {
@@ -43,23 +43,23 @@ function mcpJsonIntegration({ id, name, description, file, dir, path = ['mcpServ
     extra,
     extraLabel,
     detected: () => existsSync(dir),
-    connected: () => { try { return !!getPath(readJSONFile(file), path)?.doorman; } catch { return false; } },
-    snippet: () => JSON.stringify(nest(path, { doorman: entry }), null, 2),
+    connected: () => { try { return !!getPath(readJSONFile(file), path)?.switchboard; } catch { return false; } },
+    snippet: () => JSON.stringify(nest(path, { switchboard: entry }), null, 2),
     connect() {
       const cur = { ...init, ...readJSONFile(file) };
       backup(file);
-      setPath(cur, path, { ...(getPath(cur, path) || {}), doorman: entry });
+      setPath(cur, path, { ...(getPath(cur, path) || {}), switchboard: entry });
       writeFile(file, JSON.stringify(cur, null, 2));
-      return `Added the doorman MCP server to ${file}. ${reload || `Restart ${name} to load it.`}`;
+      return `Added the switchboard MCP server to ${file}. ${reload || `Restart ${name} to load it.`}`;
     },
     disconnect() {
       const cur = readJSONFile(file);
       const servers = getPath(cur, path);
-      if (!servers?.doorman) return 'Not connected';
+      if (!servers?.switchboard) return 'Not connected';
       backup(file);
-      delete servers.doorman;
+      delete servers.switchboard;
       writeFile(file, JSON.stringify(cur, null, 2));
-      return `Removed doorman from ${file}.`;
+      return `Removed switchboard from ${file}.`;
     },
   };
 }
@@ -70,8 +70,8 @@ function mcpJsonIntegration({ id, name, description, file, dir, path = ['mcpServ
  */
 function hermesIntegration(home) {
   const file = join(home, '.hermes', 'config.yaml');
-  const block = (indent) => `${indent}doorman:\n${indent}${indent}command: "node"\n${indent}${indent}args: [${JSON.stringify(BIN)}, "mcp"]\n`;
-  const MARKER = /^[ \t]+doorman:[ \t]*\r?\n[ \t]+command: "node"[ \t]*\r?\n[ \t]+args: \[[^\]\n]*doorman\.js[^\]\n]*\][ \t]*\r?\n?/m;
+  const block = (indent) => `${indent}switchboard:\n${indent}${indent}command: "node"\n${indent}${indent}args: [${JSON.stringify(BIN)}, "mcp"]\n`;
+  const MARKER = /^[ \t]+switchboard:[ \t]*\r?\n[ \t]+command: "node"[ \t]*\r?\n[ \t]+args: \[[^\]\n]*switchboard\.js[^\]\n]*\][ \t]*\r?\n?/m;
   return {
     id: 'hermes',
     name: 'Hermes Agent',
@@ -95,7 +95,7 @@ function hermesIntegration(home) {
         text = `${text.slice(0, head.index)}mcp_servers:\n${block(indent)}${text.slice(insertAt + 1)}`;
       }
       writeFile(file, text);
-      return 'Added doorman to ~/.hermes/config.yaml. Run /reload-mcp in Hermes (the gateway picks it up within a minute).';
+      return 'Added switchboard to ~/.hermes/config.yaml. Run /reload-mcp in Hermes (the gateway picks it up within a minute).';
     },
     disconnect() {
       if (!existsSync(file)) return 'Not connected';
@@ -103,7 +103,7 @@ function hermesIntegration(home) {
       if (!MARKER.test(text)) return 'Not connected';
       backup(file);
       writeFile(file, text.replace(MARKER, ''));
-      return 'Removed doorman from ~/.hermes/config.yaml.';
+      return 'Removed switchboard from ~/.hermes/config.yaml.';
     },
   };
 }
@@ -114,7 +114,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
   const hook = (timeout) => [{ hooks: [{ type: 'command', command: `${SELF} hook claude-code`, timeout }] }];
   const claudeHooks = { PermissionRequest: hook(hookWaitSeconds + 60), Notification: hook(15), Stop: hook(15) };
   const codexNotify = `notify = ["node", ${JSON.stringify(BIN)}, "hook", "codex"]`;
-  const codexMcp = `[mcp_servers.doorman]\ncommand = "node"\nargs = [${JSON.stringify(BIN)}, "mcp"]`;
+  const codexMcp = `[mcp_servers.switchboard]\ncommand = "node"\nargs = [${JSON.stringify(BIN)}, "mcp"]`;
 
   return [
     {
@@ -125,7 +125,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
       detected: () => existsSync(join(home, '.claude')),
       connected: () => { try { return JSON.stringify(readJSONFile(claudeSettings).hooks || {}).includes(MARK); } catch { return false; } },
       snippet: () => JSON.stringify({ hooks: claudeHooks }, null, 2),
-      extra: `claude mcp add doorman -- node "${BIN}" mcp`,
+      extra: `claude mcp add switchboard -- node "${BIN}" mcp`,
       extraLabel: 'Optional, for an ask_human tool mid-task:',
       connect() {
         const cur = readJSONFile(claudeSettings);
@@ -135,7 +135,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
           cur.hooks[ev] = [...(cur.hooks[ev] || []).filter((e) => !JSON.stringify(e).includes(MARK)), ...entries];
         }
         writeFile(claudeSettings, JSON.stringify(cur, null, 2));
-        return 'Added Doorman hooks to ~/.claude/settings.json. New Claude Code sessions use them right away.';
+        return 'Added Switchboard hooks to ~/.claude/settings.json. New Claude Code sessions use them right away.';
       },
       disconnect() {
         const cur = readJSONFile(claudeSettings);
@@ -146,7 +146,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
           if (!cur.hooks[ev].length) delete cur.hooks[ev];
         }
         writeFile(claudeSettings, JSON.stringify(cur, null, 2));
-        return 'Removed Doorman hooks from ~/.claude/settings.json.';
+        return 'Removed Switchboard hooks from ~/.claude/settings.json.';
       },
     },
     {
@@ -155,7 +155,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
       description: 'Turn-complete messages arrive as updates, and Codex gets an ask_human tool for questions mid-task.',
       file: codexConfig,
       detected: () => existsSync(join(home, '.codex')),
-      connected: () => existsSync(codexConfig) && readFileSync(codexConfig, 'utf8').includes('[mcp_servers.doorman]'),
+      connected: () => existsSync(codexConfig) && readFileSync(codexConfig, 'utf8').includes('[mcp_servers.switchboard]'),
       snippet: () => `${codexNotify}\n\n${codexMcp}`,
       connect() {
         let text = existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : '';
@@ -166,7 +166,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
           const firstTable = text.search(/^\s*\[/m);
           text = firstTable === -1 ? `${codexNotify}\n${text}` : `${text.slice(0, firstTable)}${codexNotify}\n\n${text.slice(firstTable)}`;
         } else if (!text.includes('"hook", "codex"')) notes.push('You already have a notify command, so turn-complete updates were not added.');
-        if (!text.includes('[mcp_servers.doorman]')) text = `${text.trimEnd()}\n\n${codexMcp}\n`;
+        if (!text.includes('[mcp_servers.switchboard]')) text = `${text.trimEnd()}\n\n${codexMcp}\n`;
         writeFile(codexConfig, text);
         return ['Connected Codex in ~/.codex/config.toml.', ...notes].join(' ');
       },
@@ -175,29 +175,29 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
         backup(codexConfig);
         let text = readFileSync(codexConfig, 'utf8');
         text = text.split('\n').filter((l) => !(l.trim().startsWith('notify') && l.includes('"hook", "codex"'))).join('\n');
-        text = text.replace(/\n*\[mcp_servers\.doorman\]\ncommand = "node"\nargs = \[[^\]]*\]\n?/, '\n');
+        text = text.replace(/\n*\[mcp_servers\.switchboard\]\ncommand = "node"\nargs = \[[^\]]*\]\n?/, '\n');
         writeFile(codexConfig, text);
-        return 'Removed Doorman from ~/.codex/config.toml.';
+        return 'Removed Switchboard from ~/.codex/config.toml.';
       },
     },
     mcpJsonIntegration({ id: 'cursor', name: 'Cursor', description: 'Gives Cursor’s agent ask_human, notify_human and get_human_state tools.', file: join(home, '.cursor', 'mcp.json'), dir: join(home, '.cursor') }),
-    mcpJsonIntegration({ id: 'claude-desktop', name: 'Claude Desktop', description: 'Lets Claude ask you a question or send you an update through Doorman while it works.', file: claudeDesktopConfig(home), dir: dirname(claudeDesktopConfig(home)) }),
+    mcpJsonIntegration({ id: 'claude-desktop', name: 'Claude Desktop', description: 'Lets Claude ask you a question or send you an update through Switchboard while it works.', file: claudeDesktopConfig(home), dir: dirname(claudeDesktopConfig(home)) }),
     mcpJsonIntegration({
       id: 'openclaw',
       name: 'OpenClaw',
-      description: 'Your always-on OpenClaw agent asks before it acts, and reports back, through Doorman instead of your chat apps.',
+      description: 'Your always-on OpenClaw agent asks before it acts, and reports back, through Switchboard instead of your chat apps.',
       file: join(home, '.openclaw', 'openclaw.json'),
       dir: join(home, '.openclaw'),
       path: ['mcp', 'servers'],
       reload: 'Start a new OpenClaw session, or run: openclaw mcp reload',
-      extra: `openclaw mcp add doorman --command node --arg "${BIN}" --arg mcp`,
+      extra: `openclaw mcp add switchboard --command node --arg "${BIN}" --arg mcp`,
       extraLabel: 'Or add it with the OpenClaw CLI:',
     }),
     hermesIntegration(home),
     mcpJsonIntegration({
       id: 'muse-code',
       name: 'Muse Code',
-      description: 'Meta’s terminal coding agent gets ask_human and notify_human. Marked optional, so Muse keeps working if Doorman is off.',
+      description: 'Meta’s terminal coding agent gets ask_human and notify_human. Marked optional, so Muse keeps working if Switchboard is off.',
       file: join(home, '.config', 'muse', 'settings.json'),
       dir: join(home, '.config', 'muse'),
       path: ['mcp_servers'],

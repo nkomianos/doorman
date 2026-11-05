@@ -1,5 +1,5 @@
-// Where Doorman keeps its files, and the user's settings.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+// Where Switchboard keeps its files, and the user's settings.
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_ROUTER_CONFIG } from './router.js';
@@ -27,11 +27,21 @@ export const DEFAULT_CONFIG = {
 // Settings the inbox UI / PATCH /v1/config may change.
 export const EDITABLE_KEYS = ['quietHours', 'calendar', 'digest', 'ntfy', 'telegram', 'activity', 'sessions', 'remote', 'desktop', 'bundleWindowMs', 'learnThreshold', 'hookWaitSeconds'];
 
-export function doormanHome() {
-  return process.env.DOORMAN_HOME || join(homedir(), '.doorman');
+export function switchboardHome() {
+  if (process.env.SWITCHBOARD_HOME) return process.env.SWITCHBOARD_HOME;
+  const home = join(homedir(), '.switchboard');
+  // Switchboard used to be called Doorman: carry your inbox, rules, keys and token over once.
+  const legacy = join(homedir(), '.doorman');
+  if (!existsSync(home) && existsSync(legacy)) {
+    try {
+      renameSync(legacy, home);
+      for (const old of ['doorman-url.vbs', 'doorman-icon-2.png', 'daemon.json']) rmSync(join(home, old), { force: true });
+    } catch { /* in use: try again next start */ }
+  }
+  return home;
 }
 
-export function paths(home = doormanHome()) {
+export function paths(home = switchboardHome()) {
   return {
     home,
     config: join(home, 'config.json'),
@@ -45,7 +55,7 @@ export function paths(home = doormanHome()) {
   };
 }
 
-export function ensureHome(home = doormanHome()) {
+export function ensureHome(home = switchboardHome()) {
   mkdirSync(home, { recursive: true });
   return paths(home);
 }
@@ -65,7 +75,7 @@ export function writeJSON(file, data) {
   renameSync(tmp, file);
 }
 
-export function loadConfig(home = doormanHome(), overrides = {}) {
+export function loadConfig(home = switchboardHome(), overrides = {}) {
   const p = ensureHome(home);
   const user = readJSON(p.config, {});
   return { ...DEFAULT_CONFIG, ...user, ...overrides, budget: { ...DEFAULT_CONFIG.budget, ...user.budget, ...overrides.budget } };
@@ -79,7 +89,7 @@ export function saveUserConfig(home, patch) {
   return user;
 }
 
-export function getToken(home = doormanHome()) {
+export function getToken(home = switchboardHome()) {
   const p = ensureHome(home);
   if (existsSync(p.token)) return readFileSync(p.token, 'utf8').trim();
   const token = randomToken();
