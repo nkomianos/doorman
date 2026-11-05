@@ -43,7 +43,7 @@ Doorman sits on the **receiver's** side. It's yours, across all of them, the way
 
 | | |
 |---|---|
-| **One inbox for every agent** | Claude Code, Codex, Cursor, Claude Desktop, any MCP server, scripts and plain HTTP all land in the same place. |
+| **One inbox for every agent** | Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes Agent, Muse Code, Grok and Grok Bot, the Meta Muse app, any MCP client, scripts and plain HTTP all land in the same place. |
 | **Interrupts you only when it matters** | Your status (Available, Focus, Do not disturb, Away), deadlines, safe defaults, urgency and a per-agent ping budget decide when you get pinged. Every request says **why**. |
 | **Bundles and digests** | Requests that arrive together become one notification. Low-priority updates wait for your digest or your next break. |
 | **Learns your preferences** | Answer the same way three times and Doorman offers a rule. It spots patterns too: allow `git status`, `git diff` and `git log` and it offers one rule for `Bash:git *`. It never offers to automate anything irreversible. |
@@ -64,7 +64,7 @@ node bin/doorman.js start      # opens on http://127.0.0.1:7777
 Open **http://127.0.0.1:7777**. A first-run checklist walks you through four steps:
 
 1. **Run the demo** to see three sample agents compete for your attention.
-2. **Connect your agents** with one click each (Doorman backs up every config it edits).
+2. **Connect your agents**: one click each for local agents (Doorman backs up every config it edits), a tunnel for cloud agents like Grok.
 3. **Set up your phone** with Telegram or ntfy.
 4. **Tell Doorman when you're busy** with a calendar link or activity sensing.
 
@@ -113,8 +113,21 @@ The **Connect** page detects what's installed and wires it up with one click. Pr
 
 ```bash
 doorman setup                       # what's installed and connected
-doorman setup claude-code --write   # or: codex, cursor, claude-desktop  (--remove to undo)
+doorman setup claude-code --write   # or any id below  (--remove to undo)
 ```
+
+| Agent | Runs | How it connects | Setup |
+|---|---|---|---|
+| **Claude Code** | your computer | Hooks (permission prompts, “done”) + MCP | One click · `claude-code` |
+| **Codex** | your computer | `notify` + MCP | One click · `codex` |
+| **Cursor** | your computer | MCP | One click · `cursor` |
+| **Claude Desktop** | your computer | MCP | One click · `claude-desktop` |
+| **OpenClaw** | your computer | MCP (`mcp.servers`) | One click · `openclaw` |
+| **Hermes Agent** (Nous Research) | your computer | MCP (`mcp_servers` in `~/.hermes/config.yaml`) | One click · `hermes` |
+| **Muse Code** (Meta) | your computer | MCP (`~/.config/muse/settings.json`) | One click · `muse-code` |
+| **Grok & Grok Bot** (xAI) | the cloud | Remote MCP connector | [Tunnel + agent key](#agents-in-the-cloud) |
+| **Meta Muse app** | the cloud | Custom connector to the remote MCP URL (experimental) | [Tunnel + agent key](#agents-in-the-cloud) |
+| **Anything else** | anywhere | MCP (stdio or HTTP), HTTP API, CLI or SDK | [Below](#scripts-and-other-agents) |
 
 <img alt="The Connect page: Claude Code connected, Codex, Cursor and Claude Desktop ready to connect with one click, and phone setup" src="docs/images/connect.png" width="900">
 
@@ -127,6 +140,24 @@ doorman setup claude-code --write   # or: codex, cursor, claude-desktop  (--remo
 - Optional: `claude mcp add doorman -- node /path/to/bin/doorman.js mcp` gives Claude an `ask_human` tool for questions mid-task.
 
 Each project gets its own budget and rules (`claude-code-<project>`).
+</details>
+
+<details>
+<summary><b>OpenClaw, Hermes Agent and Muse Code</b>: your always-on agents ask before they act</summary>
+
+All three speak MCP, so they get Doorman's `ask_human`, `notify_human` and `get_human_state` tools. The Connect page (or `doorman setup <id> --write`) adds the server for you. By hand:
+
+- **OpenClaw**: `openclaw mcp add doorman --command node --arg /path/to/bin/doorman.js --arg mcp`, then start a new session (or `openclaw mcp reload`).
+- **Hermes Agent**: add to `~/.hermes/config.yaml`, then run `/reload-mcp` (the messaging gateway picks it up within a minute):
+  ```yaml
+  mcp_servers:
+    doorman:
+      command: "node"
+      args: ["/path/to/bin/doorman.js", "mcp"]
+  ```
+- **Muse Code**: add `doorman` under `mcp_servers` in `~/.config/muse/settings.json` with `"mode": "optional"` (so Muse still runs when Doorman is off), restart, and check with `/mcp`.
+
+Tip: tell your agent in its instructions or memory to use `ask_human` before anything irreversible (sending, paying, deleting, posting) and `notify_human` for status updates, instead of messaging you directly.
 </details>
 
 <details>
@@ -156,6 +187,22 @@ The proxy passes everything through, except that:
 - the server's **elicitation** requests (MCP's “ask the user”) come to Doorman instead. Yes/no and choice questions become one-tap decisions; anything else becomes a form.
 </details>
 
+### Agents in the cloud
+
+Grok and Grok Bot, the Meta Muse app and other cloud agents can't reach `localhost`. Doorman gives them a private URL through a tunnel:
+
+```bash
+doorman tunnel        # free Cloudflare quick tunnel; needs cloudflared (winget / brew install cloudflared)
+```
+
+1. Create an **agent key** on the Connect page.
+2. Run `doorman tunnel`. It prints `https://<random>.trycloudflare.com/mcp?key=<agent key>`.
+3. **Grok / Grok Bot**: grok.com/connectors → **New connector** → **Custom** → paste the URL (paid Grok plans).
+   **Meta Muse app**: it has no MCP setting yet; ask Muse to create a custom connector for that MCP server (experimental).
+
+Through the tunnel, **only agent keys work**, and only for asking, waiting and reading your status. The inbox, settings and your owner token never answer from outside this computer. Press Ctrl-C and remote access turns off. Using ngrok or your own tunnel? Turn on **Cloud agents** on the Connect page instead.
+
+<a id="scripts-and-other-agents"></a>
 <details>
 <summary><b>Scripts and other agents</b>: one HTTP call, with their own key</summary>
 
@@ -200,6 +247,7 @@ On **Windows**, desktop notifications have answer buttons too. Doorman registers
 - **Activity sensing is opt-in** and reads two things: time since your last input, and the *name* of the app in front. Never window titles, keystrokes or screenshots. It's kept in memory, never logged.
 - **Session view** only reads the tail of Claude Code and Codex logs on your computer. You can turn it off in Settings.
 - **Tokens and keys.** The owner token is in `~/.doorman/token` (mode 600). Agent keys are stored hashed and can be revoked any time.
+- **Cloud access is off by default.** When you turn it on, requests from outside this computer must use an agent key and can only reach the agent routes and `/mcp`.
 - **Signed one-tap answers.** Phone and desktop buttons carry an HMAC per request and option; forged answers are rejected.
 - **Hash-chained log.** `doorman ledger verify` detects edits and deletions.
 - **You are the customer.** There is no way for an agent to buy priority.
@@ -240,7 +288,7 @@ doorman setup [agent] [--write|--remove]  doorman rules [list | add … | rm <id
 doorman ask "…" -o A -o B [...]           doorman ledger [tail | verify | export]
 doorman notify "…" [--urgency low]        doorman demo [--speed 2]
 doorman mcp                               doorman hook <claude-code|codex>
-doorman proxy [--gate …] -- <cmd…>
+doorman proxy [--gate …] -- <cmd…>         doorman tunnel
 ```
 
 State lives in `~/.doorman` (set `DOORMAN_HOME` to change it): `config.json`, `rules.json` (hand-editable), `state.json`, `keys.json`, `ledger.jsonl`, `token`.
@@ -262,7 +310,7 @@ Use **Settings → Send a test notification**. On Windows, look for **Doorman** 
 <details>
 <summary><b>Can agents in the cloud reach it?</b></summary>
 
-Not yet. Doorman only listens on your own computer. Cloud agents and a hosted relay are on the roadmap.
+Yes, through a tunnel you control: `doorman tunnel` opens one, and only agent keys work through it. See [Agents in the cloud](#agents-in-the-cloud). A hosted relay with stable URLs is on the roadmap.
 </details>
 
 <details>
@@ -274,7 +322,7 @@ Hooks fail open: Claude Code falls back to its normal prompt. The SDK and `doorm
 ## Roadmap
 
 - Native menu-bar / tray app and a mobile app (the Ask format already carries a one-line form)
-- Cloud agents (Devin, Cursor background agents, GitHub Copilot) and an optional encrypted relay
+- An optional encrypted relay with stable URLs for cloud agents, and native connectors for Devin, Cursor background agents and GitHub Copilot
 - Cross-agent grouping of related requests (same trip, same PR) via `thread`
 - OS focus-mode integration (macOS Focus, Windows Focus sessions)
 - Team mode: approval policies, escalation paths and audit export

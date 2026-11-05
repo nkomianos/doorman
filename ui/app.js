@@ -847,7 +847,7 @@ function setupSteps() {
   const realAgents = S.agents.filter((g) => !g.id.startsWith('demo-'));
   return [
     { key: 'demo', title: 'See it with sample agents', text: 'Three made-up agents send 12 requests at once. See how few of them actually ping you.', done: (S.stats?.asks || 0) > 0, action: `<button class="btn primary sm" data-act="demo">${I('play', 14)} Run the demo</button>` },
-    { key: 'agents', title: 'Connect your agents', text: 'One click for Claude Code, Codex, Cursor or Claude Desktop. Anything else can use a key.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>` },
+    { key: 'agents', title: 'Connect your agents', text: 'One click for Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes or Muse Code. Grok and other cloud agents connect through a tunnel.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>` },
     { key: 'phone', title: 'Get pings on your phone', text: 'Answer from your lock screen with one tap, through Telegram or ntfy.', done: !!(S.config?.telegram?.paired || c.ntfy?.topic), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="phone">${I('phone', 14)} Set up phone</button>` },
     { key: 'context', title: 'Tell Doorman when you’re busy', text: 'Connect a calendar, or let it notice when you step away or join a call.', done: !!(c.calendar?.ics || c.activity?.enabled), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="calendar">${I('calendar', 14)} Calendar &amp; activity</button>` },
   ];
@@ -940,9 +940,29 @@ function viewConnect() {
       <div class="form-actions">${i.connected
         ? `<button class="btn sm" data-act="integration" data-id="${i.id}" data-on="0">Disconnect</button>`
         : `<button class="btn ${i.detected ? 'primary ' : ''}sm" data-act="integration" data-id="${i.id}" data-on="1">${I('link', 14)} Connect</button>`}
-        <details class="snippet"><summary>Do it by hand</summary><p class="help">Add to <code>${esc(i.file)}</code>:</p><pre class="full">${esc(i.snippet)}</pre>${i.extra ? `<p class="help">Optional, for an ask_human tool:</p>${cmdBox(i.extra)}` : ''}</details>
+        <details class="snippet"><summary>Do it by hand</summary><p class="help">Add to <code>${esc(i.file)}</code>:</p><pre class="full">${esc(i.snippet)}</pre>${i.extra ? `<p class="help">${esc(i.extraLabel || 'Also:')}</p>${cmdBox(i.extra)}` : ''}</details>
       </div>
     </div>`).join('') || '<p class="help">Loading…</p>'}</div>
+  </section>`;
+
+  // Cloud agents
+  const rem = c.remote || {};
+  const mcpUrl = `${rem.url || 'https://<your-tunnel>'}/mcp?key=${S.newKey?.key || '<agent key>'}`;
+  html += `<section class="panel" id="s-cloud"><h2>Agents in the cloud</h2>
+    <p class="help"><b>Grok</b> and <b>Grok Bot</b>, the <b>Meta Muse</b> app and other cloud agents can’t reach your computer directly. Give them a private URL through a tunnel. Only <b>agent keys</b> work through it: your inbox, settings and owner token stay on this computer.</p>
+    ${rem.enabled
+      ? `<div class="callout ok">${I('check', 16)}<div><b>Cloud agents can reach you</b>${rem.url ? ` at <code>${esc(rem.url)}</code>` : ''}. Give each one its own key.${cmdBox(mcpUrl)}</div></div>
+        <div class="form-actions" style="margin-top:12px"><button class="btn sm" data-act="remote" data-on="0">Turn off cloud access</button></div>`
+      : `<ol class="mini-steps">
+          <li><b>Create an agent key</b> for it, under <a href="#connect/other" data-act="go" data-view="connect" data-anchor="other">Any other agent</a> below.</li>
+          <li><b>Open a tunnel.</b> Doorman can do it with Cloudflare’s free quick tunnels:${cmdBox(`${S.config?.cli || 'doorman'} tunnel`)}<span class="help">Needs <code>cloudflared</code>: <code>winget install --id Cloudflare.cloudflared</code> on Windows, <code>brew install cloudflared</code> on macOS. Using ngrok or your own tunnel instead? <button class="link-btn" data-act="remote" data-on="1">Allow cloud agents</button> and paste its URL.</span></li>
+          <li><b>Add Doorman to your agent</b> with the URL it prints: <code>https://…/mcp?key=…</code></li>
+        </ol>`}
+    <div class="cloud-agents">
+      <div><b>Grok &amp; Grok Bot</b><p>grok.com/connectors → <b>New connector</b> → <b>Custom</b> → paste the MCP URL. Custom connectors need a paid Grok plan.</p></div>
+      <div><b>Meta Muse app</b><p>There’s no MCP setting yet. Ask Muse: “Create a custom connector for the MCP server at <i>URL</i>, and use ask_human before doing anything I haven’t approved.” Experimental.</p></div>
+      <div><b>Anything else</b><p>Any agent that supports remote MCP (Streamable HTTP), or plain HTTP to <code>/v1/asks</code> with the key.</p></div>
+    </div>
   </section>`;
 
   // Phone
@@ -1001,7 +1021,7 @@ function viewConnect() {
 
   // Other agents
   html += `<section class="panel" id="s-other"><h2>Any other agent or script</h2>
-    <p class="help">Anything that can make an HTTP request can ask you something. Give each one its own <b>agent key</b>: a key can only send requests and read your status (Available, Focus…). It can’t answer, read your inbox or pretend to be another agent.</p>
+    <p class="help">Scripts, your own agents, and cloud agents like Grok. Anything that can make an HTTP request can ask you something. Give each one its own <b>agent key</b>: a key can only send requests and read your status (Available, Focus…). It can’t answer, read your inbox or pretend to be another agent.</p>
     <div class="inline-form"><input class="input" data-key-name placeholder="Name it, e.g. Nightly backup" aria-label="Key name"><button class="btn primary sm" data-act="key-create">${I('key', 14)} Create key</button></div>
     ${S.newKey ? `<div class="callout ok">${I('key', 16)}<div><b>Copy this key now.</b> It won’t be shown again.${cmdBox(S.newKey.key)}</div></div>` : ''}
     ${S.keys.length ? `<div class="list keys">${S.keys.map((k) => `<div class="item"><span class="ico">${I('key', 15)}</span><div><div class="title">${esc(k.name)}</div><div class="sub"><span class="mono">${esc(k.prefix)}…</span><span>·</span><span>agent id <span class="mono">${esc(k.agent_id)}</span></span><span>·</span><span>${k.last_used ? `used ${fmtAgo(k.last_used)}` : 'never used'}</span></div></div><div class="side"><button class="btn ghost sm" data-act="key-revoke" data-id="${k.id}">Revoke</button></div></div>`).join('')}</div>` : ''}
@@ -1351,6 +1371,20 @@ document.addEventListener('click', async (e) => {
       return undefined;
     }
     case 'snippet-lang': S.snippetLang = b.dataset.key; return render();
+    case 'remote': {
+      const on = b.dataset.on === '1';
+      let url = S.config?.config?.remote?.url || null;
+      if (on) {
+        url = (prompt('Your tunnel’s public URL (e.g. https://abc.ngrok.app). Leave empty if you’ll add it later.') || '').trim().replace(/\/+$/, '') || null;
+        if (url && !/^https:\/\//.test(url)) return toast('Use the https:// URL your tunnel gives you', { error: true });
+      }
+      try {
+        S.config = await api('PATCH', '/v1/config', { remote: { enabled: on, url: on ? url : null } });
+        render();
+        toast(on ? 'Cloud agents can reach you through your tunnel' : 'Cloud access is off', { sub: on ? 'Only agent keys work from outside this computer' : '' });
+      } catch (err) { fail(err); }
+      return undefined;
+    }
     case 'test-ask':
       try {
         await api('POST', '/v1/asks', { agent: { id: 'test-agent', name: 'Test agent' }, question: 'Is Doorman set up the way you want?', options: [{ id: 'yes', label: 'Yes', style: 'primary' }, { id: 'later', label: 'Not yet' }], urgency: 'high', detail: 'This is a test request from the Connect page.', default: 'later', deadline: '1h' });

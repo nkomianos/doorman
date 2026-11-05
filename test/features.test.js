@@ -1,10 +1,12 @@
 // Setup integrations, session discovery, pattern learning, agent keys, Telegram and activity.
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { categorize } from '../src/activity.js';
 import { DoormanClient } from '../src/client.js';
 import { startDaemon } from '../src/daemon.js';
@@ -54,6 +56,43 @@ describe('one-click integrations', () => {
     const r = setIntegration('codex', true, { home });
     assert.match(r.message, /already have a notify/);
     assert.ok(readFileSync(file, 'utf8').includes('my-notifier'));
+  });
+
+  test('OpenClaw and Muse Code: servers go where each one reads them', () => {
+    const home = tmp('claws');
+    mkdirSync(join(home, '.openclaw'));
+    writeFileSync(join(home, '.openclaw', 'openclaw.json'), JSON.stringify({ agents: { default: 'main' }, mcp: { servers: { files: { command: 'npx' } } } }));
+    setIntegration('openclaw', true, { home });
+    const oc = JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8'));
+    assert.equal(oc.agents.default, 'main');
+    assert.ok(oc.mcp.servers.files && oc.mcp.servers.doorman.args.includes('mcp'));
+    setIntegration('openclaw', false, { home });
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf8')).mcp.servers), ['files']);
+
+    mkdirSync(join(home, '.config', 'muse'), { recursive: true });
+    setIntegration('muse-code', true, { home });
+    const muse = JSON.parse(readFileSync(join(home, '.config', 'muse', 'settings.json'), 'utf8'));
+    assert.equal(muse.schema_version, 1);
+    assert.equal(muse.mcp_servers.doorman.mode, 'optional');
+  });
+
+  test('Hermes: adds and removes only its own YAML block, matching your indentation', () => {
+    const home = tmp('hermes');
+    mkdirSync(join(home, '.hermes'));
+    const file = join(home, '.hermes', 'config.yaml');
+    const original = 'model: hermes-4\nmcp_servers:\n    github:\n        command: "npx"\n        args: ["-y", "@modelcontextprotocol/server-github"]\nmemory:\n    enabled: true\n';
+    writeFileSync(file, original);
+    setIntegration('hermes', true, { home });
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /mcp_servers:\n {4}doorman:\n {8}command: "node"/);
+    assert.ok(text.includes('    github:') && text.includes('memory:'));
+    assert.equal(listIntegrations({ home }).find((i) => i.id === 'hermes').connected, true);
+    setIntegration('hermes', false, { home });
+    assert.equal(readFileSync(file, 'utf8'), original);
+
+    writeFileSync(file, 'model: hermes-4\n');
+    setIntegration('hermes', true, { home });
+    assert.match(readFileSync(file, 'utf8'), /^model: hermes-4\n\nmcp_servers:\n {2}doorman:/);
   });
 
   test('a broken JSON config is refused, not overwritten', () => {
@@ -168,6 +207,38 @@ describe('agent keys (live daemon)', () => {
     assert.equal((await agent.request('GET', '/v1/state')).mode, 'available');
     await owner.request('DELETE', `/v1/keys/${k.id}`);
     await assert.rejects(agent.request('GET', '/v1/state'), (e) => e.status === 401);
+  });
+
+  test('MCP over HTTP: an agent key gets the tools, and its asks are attributed to it', async () => {
+    const k = await owner.request('POST', '/v1/keys', { name: 'Grok' });
+    const mcp = new Client({ name: 'grok-test', version: '1.0.0' });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${d.url}/mcp?key=${k.key}`)));
+    try {
+      const { tools } = await mcp.listTools();
+      assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human']);
+      const r = await mcp.callTool({ name: 'ask_human', arguments: { question: 'Post the thread on X?', options: ['Post', 'Hold'], default: 'Hold', deadline: '1h', wait_seconds: 0 } });
+      const view = JSON.parse(r.content[0].text);
+      assert.equal(view.status, 'pending');
+      assert.equal((await owner.request('GET', `/v1/asks/${view.id}`)).ask.agent.id, k.agent_id);
+    } finally {
+      await mcp.close();
+    }
+    await assert.rejects(fetch(`${d.url}/mcp`, { method: 'POST' }).then((res) => { if (!res.ok) throw Object.assign(new Error('x'), { status: res.status }); }), (e) => e.status === 401);
+  });
+
+  test('through a tunnel: off by default, then agent keys only, never the inbox or owner token', async () => {
+    const k = await owner.request('POST', '/v1/keys', { name: 'Cloud agent' });
+    const viaTunnel = (path, auth) => new Promise((resolve) => {
+      const req = httpRequest(`${d.url}${path}`, { headers: { host: 'abc-def.trycloudflare.com', ...(auth ? { authorization: `Bearer ${auth}` } : {}) } }, (res) => { res.resume(); resolve(res.statusCode); });
+      req.end();
+    });
+    assert.equal(await viaTunnel('/v1/state', k.key), 421, 'remote access is off by default');
+    await owner.request('PATCH', '/v1/config', { remote: { enabled: true, url: 'https://abc-def.trycloudflare.com' } });
+    assert.equal(await viaTunnel('/v1/state', k.key), 200);
+    assert.equal(await viaTunnel('/v1/state', d.token), 403, 'the owner token never works from outside');
+    assert.equal(await viaTunnel('/', null), 421, 'the inbox never answers outside');
+    assert.equal(await viaTunnel('/v1/asks', k.key), 403, 'keys still only reach agent routes');
+    await owner.request('PATCH', '/v1/config', { remote: { enabled: false, url: null } });
   });
 
   test('notification buttons need a valid signature', async () => {

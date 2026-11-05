@@ -19,11 +19,13 @@ export const DEFAULT_CONFIG = {
   activity: { enabled: false, awayAfterMinutes: 10, meetings: true, editorFocus: false },
   // Show what Claude Code / Codex sessions are doing, read from their own logs on this machine.
   sessions: true,
+  // Cloud agents (Grok, the Muse app…) reach /mcp through a tunnel with an agent key. Off by default.
+  remote: { enabled: false, url: null },
   hookWaitSeconds: 600,
 };
 
 // Settings the inbox UI / PATCH /v1/config may change.
-export const EDITABLE_KEYS = ['quietHours', 'calendar', 'digest', 'ntfy', 'telegram', 'activity', 'sessions', 'desktop', 'bundleWindowMs', 'learnThreshold', 'hookWaitSeconds'];
+export const EDITABLE_KEYS = ['quietHours', 'calendar', 'digest', 'ntfy', 'telegram', 'activity', 'sessions', 'remote', 'desktop', 'bundleWindowMs', 'learnThreshold', 'hookWaitSeconds'];
 
 export function doormanHome() {
   return process.env.DOORMAN_HOME || join(homedir(), '.doorman');

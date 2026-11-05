@@ -33,7 +33,8 @@ Agents
                                            Route a server's elicitations + gate its tools
   doorman hook claude-code                 Claude Code hook (PermissionRequest, Notification, Stop)
   doorman hook codex '<json>'              Codex notify program
-  doorman setup [claude-code|codex|cursor|claude-desktop] [--write|--remove]
+  doorman setup [agent] [--write|--remove]   Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes, Muse Code
+  doorman tunnel                           Let cloud agents (Grok, the Muse app) reach you via /mcp
   doorman demo [--speed 1]                 Three agents need you at once
 
 Env: DOORMAN_HOME (default ~/.doorman), DOORMAN_URL, DOORMAN_AGENT, DOORMAN_AGENT_NAME`;
@@ -255,6 +256,43 @@ async function cmdSetup(args) {
   }
 }
 
+/**
+ * Let cloud agents (Grok, the Muse app…) reach you: a free Cloudflare quick tunnel to
+ * this daemon. Only /mcp and the agent routes answer through it, and only with an
+ * agent key; the inbox and your owner token stay local. Ctrl-C turns it off again.
+ */
+async function cmdTunnel() {
+  const c = new DoormanClient();
+  if (!(await c.ensure())) die('could not reach or start the doorman daemon');
+  const port = new URL(c.url).port || '7777';
+  const proc = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  proc.on('error', () => die([
+    'cloudflared is not installed. It makes a free, temporary public URL for Doorman:',
+    '  Windows:  winget install --id Cloudflare.cloudflared',
+    '  macOS:    brew install cloudflared',
+    '  Linux:    https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/',
+    'Or use any tunnel (e.g. ngrok http 7777) and turn on "Cloud agents" on the Connect page.',
+  ].join('\n')));
+  let url = null;
+  const onData = async (d) => {
+    const m = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(String(d));
+    if (!m || url) return;
+    url = m[0];
+    await c.request('PATCH', '/v1/config', { remote: { enabled: true, url } });
+    console.log(`\n  Cloud agents can now reach Doorman.\n\n  MCP URL:  ${url}/mcp?key=<agent key>\n\n  1. Create an agent key in the inbox: Connect → Any other agent.\n  2. In Grok: grok.com/connectors → New connector → Custom → paste the MCP URL with your key.\n\n  Only agent keys work through this URL. Press Ctrl-C to close it; remote access turns off.\n  (Quick-tunnel URLs change each time, so update the connector if you restart.)\n`);
+  };
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+  const stop = async () => {
+    await c.request('PATCH', '/v1/config', { remote: { enabled: false, url: null } }).catch(() => {});
+    proc.kill();
+    process.exitCode = 0;
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  proc.on('exit', () => { if (url) console.log('Tunnel closed.'); });
+}
+
 /** doorman://answer?... from a Windows notification button. */
 async function cmdUrl(args) {
   const { parseActionUrl } = await import('../src/winproto.js');
@@ -331,6 +369,7 @@ async function main() {
     case 'hook': return cmdHook(args);
     case 'setup': return cmdSetup(args);
     case 'url': return cmdUrl(args);
+    case 'tunnel': return cmdTunnel();
     case 'demo': {
       const { runDemo } = await import('../src/demo.js');
       return runDemo({ speed: Number(args.flags.speed) || 1 });

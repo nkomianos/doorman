@@ -44,14 +44,19 @@ function hostOk(req) {
   return LOCAL_HOSTS.has(host);
 }
 
+/** The presented credential: a bearer header, or ?key= for connectors that can only take a URL. */
+function given(req, url) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7) : url.searchParams.get('key') || url.searchParams.get('token') || '';
+}
+
 /** Who is calling: the owner (inbox, CLI), an agent holding an agent key, or nobody. */
 function whoIs(req, url, token, keys) {
-  const h = req.headers.authorization || '';
-  const given = h.startsWith('Bearer ') ? h.slice(7) : url.searchParams.get('token') || '';
-  const a = Buffer.from(given);
+  const presented = given(req, url);
+  const a = Buffer.from(presented);
   const b = Buffer.from(token);
   if (a.length === b.length && timingSafeEqual(a, b)) return { role: 'owner' };
-  const key = keys?.check(given);
+  const key = keys?.check(presented);
   return key ? { role: 'agent', key } : null;
 }
 
@@ -64,7 +69,7 @@ const AGENT_ROUTES = [
   ['DELETE', /^\/v1\/asks\/[\w-]+$/],
 ];
 
-export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown, startDemo, keys = null, extraRoutes = [] }) {
+export function createServer({ router, token, version, getConfig, updateConfig, notifyTest, onShutdown, startDemo, keys = null, extraRoutes = [], remote = () => false, mcpHttp = null }) {
   const clients = new Set();
   const broadcast = (event, data) => {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -176,8 +181,11 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
   const server = createHttpServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
-      // DNS-rebinding guard: only answer requests addressed to loopback names.
-      if (!hostOk(req)) throw httpError(421, 'doorman only answers on localhost');
+      // DNS-rebinding guard: the inbox and the owner token only ever answer on loopback names.
+      // With remote access on (for cloud agents behind a tunnel), other hosts may reach
+      // /mcp and the agent routes, and only with an agent key (checked below).
+      const local = hostOk(req);
+      if (!local && !(remote() && (url.pathname === '/mcp' || url.pathname.startsWith('/v1/')))) throw httpError(421, 'doorman only answers on localhost');
 
       if (req.method === 'GET' && url.pathname === '/v1/health') return send(res, 200, { ok: true, name: 'doorman', version });
 
@@ -194,6 +202,15 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
 
       const who = whoIs(req, url, token, keys);
       if (!who) throw httpError(401, 'missing or bad token (use ~/.doorman/token, or an agent key from the inbox)');
+      if (!local && who.role !== 'agent') throw httpError(403, 'from outside this computer, only agent keys are accepted');
+
+      // MCP over HTTP (Streamable HTTP, stateless): for agents that can't launch a local
+      // process, like Grok or other cloud agents reaching Doorman through a tunnel.
+      if (url.pathname === '/mcp') {
+        if (!mcpHttp) throw httpError(501, 'MCP over HTTP is not available');
+        return mcpHttp(req, res, who, given(req, url));
+      }
+
       if (who.role === 'agent' && !AGENT_ROUTES.some(([m, re]) => m === req.method && re.test(url.pathname))) {
         throw httpError(403, 'agent keys can only ask, wait for their own answers, and read your status');
       }

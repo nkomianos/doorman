@@ -25,30 +25,85 @@ function claudeDesktopConfig(home) {
   return join(home, '.config', 'Claude', 'claude_desktop_config.json');
 }
 
-/** An MCP client configured through a JSON file with an `mcpServers` map. */
-function mcpJsonIntegration({ id, name, description, file, dir }) {
+const getPath = (obj, path) => path.reduce((o, k) => o?.[k], obj);
+function setPath(obj, path, value) {
+  let o = obj;
+  for (const k of path.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
+  o[path.at(-1)] = value;
+}
+const nest = (path, value) => path.reduceRight((v, k) => ({ [k]: v }), value);
+
+/** An MCP client configured through a JSON file with a map of servers at `path`. */
+function mcpJsonIntegration({ id, name, description, file, dir, path = ['mcpServers'], entry = { command: 'node', args: [BIN, 'mcp'] }, init = {}, reload, extra = null, extraLabel = null }) {
   return {
     id,
     name,
     description,
     file,
+    extra,
+    extraLabel,
     detected: () => existsSync(dir),
-    connected: () => { try { return !!readJSONFile(file).mcpServers?.doorman; } catch { return false; } },
-    snippet: () => JSON.stringify({ mcpServers: { doorman: { command: 'node', args: [BIN, 'mcp'] } } }, null, 2),
+    connected: () => { try { return !!getPath(readJSONFile(file), path)?.doorman; } catch { return false; } },
+    snippet: () => JSON.stringify(nest(path, { doorman: entry }), null, 2),
     connect() {
-      const cur = readJSONFile(file);
+      const cur = { ...init, ...readJSONFile(file) };
       backup(file);
-      cur.mcpServers = { ...(cur.mcpServers || {}), doorman: { command: 'node', args: [BIN, 'mcp'] } };
+      setPath(cur, path, { ...(getPath(cur, path) || {}), doorman: entry });
       writeFile(file, JSON.stringify(cur, null, 2));
-      return `Added the doorman MCP server to ${file}. Restart ${name} to load it.`;
+      return `Added the doorman MCP server to ${file}. ${reload || `Restart ${name} to load it.`}`;
     },
     disconnect() {
       const cur = readJSONFile(file);
-      if (!cur.mcpServers?.doorman) return 'Not connected';
+      const servers = getPath(cur, path);
+      if (!servers?.doorman) return 'Not connected';
       backup(file);
-      delete cur.mcpServers.doorman;
+      delete servers.doorman;
       writeFile(file, JSON.stringify(cur, null, 2));
       return `Removed doorman from ${file}.`;
+    },
+  };
+}
+
+/**
+ * Hermes keeps MCP servers in YAML. We don't parse YAML (no dependency for one file):
+ * we add or remove exactly our own three-line block under `mcp_servers:`.
+ */
+function hermesIntegration(home) {
+  const file = join(home, '.hermes', 'config.yaml');
+  const block = (indent) => `${indent}doorman:\n${indent}${indent}command: "node"\n${indent}${indent}args: [${JSON.stringify(BIN)}, "mcp"]\n`;
+  const MARKER = /^[ \t]+doorman:[ \t]*\r?\n[ \t]+command: "node"[ \t]*\r?\n[ \t]+args: \[[^\]\n]*doorman\.js[^\]\n]*\][ \t]*\r?\n?/m;
+  return {
+    id: 'hermes',
+    name: 'Hermes Agent',
+    description: 'Nous Research’s agent gets ask_human, notify_human and get_human_state, in the terminal and in its messaging gateway.',
+    file,
+    detected: () => existsSync(join(home, '.hermes')),
+    connected: () => existsSync(file) && MARKER.test(readFileSync(file, 'utf8')),
+    snippet: () => `mcp_servers:\n${block('  ')}`,
+    extra: '/reload-mcp',
+    extraLabel: 'Then, inside Hermes:',
+    connect() {
+      let text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+      if (MARKER.test(text)) return 'Already connected.';
+      backup(file);
+      const head = /^mcp_servers:[ \t]*(\{\s*\})?[ \t]*$/m.exec(text);
+      if (!head) text = `${text.trimEnd()}${text.trim() ? '\n\n' : ''}mcp_servers:\n${block('  ')}`;
+      else {
+        const after = text.slice(head.index + head[0].length + 1);
+        const indent = (/^([ \t]+)\S/m.exec(after) || [])[1] || '  ';
+        const insertAt = head.index + head[0].length;
+        text = `${text.slice(0, head.index)}mcp_servers:\n${block(indent)}${text.slice(insertAt + 1)}`;
+      }
+      writeFile(file, text);
+      return 'Added doorman to ~/.hermes/config.yaml. Run /reload-mcp in Hermes (the gateway picks it up within a minute).';
+    },
+    disconnect() {
+      if (!existsSync(file)) return 'Not connected';
+      const text = readFileSync(file, 'utf8');
+      if (!MARKER.test(text)) return 'Not connected';
+      backup(file);
+      writeFile(file, text.replace(MARKER, ''));
+      return 'Removed doorman from ~/.hermes/config.yaml.';
     },
   };
 }
@@ -71,6 +126,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
       connected: () => { try { return JSON.stringify(readJSONFile(claudeSettings).hooks || {}).includes(MARK); } catch { return false; } },
       snippet: () => JSON.stringify({ hooks: claudeHooks }, null, 2),
       extra: `claude mcp add doorman -- node "${BIN}" mcp`,
+      extraLabel: 'Optional, for an ask_human tool mid-task:',
       connect() {
         const cur = readJSONFile(claudeSettings);
         backup(claudeSettings);
@@ -126,6 +182,29 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
     },
     mcpJsonIntegration({ id: 'cursor', name: 'Cursor', description: 'Gives Cursor’s agent ask_human, notify_human and get_human_state tools.', file: join(home, '.cursor', 'mcp.json'), dir: join(home, '.cursor') }),
     mcpJsonIntegration({ id: 'claude-desktop', name: 'Claude Desktop', description: 'Lets Claude ask you a question or send you an update through Doorman while it works.', file: claudeDesktopConfig(home), dir: dirname(claudeDesktopConfig(home)) }),
+    mcpJsonIntegration({
+      id: 'openclaw',
+      name: 'OpenClaw',
+      description: 'Your always-on OpenClaw agent asks before it acts, and reports back, through Doorman instead of your chat apps.',
+      file: join(home, '.openclaw', 'openclaw.json'),
+      dir: join(home, '.openclaw'),
+      path: ['mcp', 'servers'],
+      reload: 'Start a new OpenClaw session, or run: openclaw mcp reload',
+      extra: `openclaw mcp add doorman --command node --arg "${BIN}" --arg mcp`,
+      extraLabel: 'Or add it with the OpenClaw CLI:',
+    }),
+    hermesIntegration(home),
+    mcpJsonIntegration({
+      id: 'muse-code',
+      name: 'Muse Code',
+      description: 'Meta’s terminal coding agent gets ask_human and notify_human. Marked optional, so Muse keeps working if Doorman is off.',
+      file: join(home, '.config', 'muse', 'settings.json'),
+      dir: join(home, '.config', 'muse'),
+      path: ['mcp_servers'],
+      entry: { command: 'node', args: [BIN, 'mcp'], mode: 'optional' },
+      init: { schema_version: 1 },
+      reload: 'Restart Muse Code, then check with /mcp.',
+    }),
   ];
 }
 
@@ -139,6 +218,7 @@ export function listIntegrations(opts) {
     connected: i.connected(),
     snippet: i.snippet(),
     extra: i.extra || null,
+    extraLabel: i.extraLabel || null,
   }));
 }
 

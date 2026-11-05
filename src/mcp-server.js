@@ -15,7 +15,8 @@ function describe(view) {
   return view;
 }
 
-export async function runMcpServer({ client } = {}) {
+/** The Doorman MCP tools, bound to one client (stdio) or one agent key (HTTP). */
+export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSeconds = 3600 } = {}) {
   const server = new McpServer({ name: 'doorman', version: VERSION });
   const c = client || new DoormanClient();
   const agent = () => {
@@ -61,7 +62,7 @@ export async function runMcpServer({ client } = {}) {
     if (args.options?.length) input.options = args.options;
     else input.input = { type: 'text' };
     try {
-      const view = await c.ask(input, { timeoutMs: (args.wait_seconds ?? 120) * 1000 });
+      const view = await c.ask(input, { timeoutMs: Math.min(args.wait_seconds ?? defaultWaitSeconds, maxWaitSeconds) * 1000 });
       return text(describe(view));
     } catch (err) {
       return { ...text(`Doorman error: ${err.message}`), isError: true };
@@ -110,6 +111,11 @@ export async function runMcpServer({ client } = {}) {
     }
   });
 
+  return server;
+}
+
+export async function runMcpServer({ client } = {}) {
+  const server = buildMcpServer({ client });
   await server.connect(new StdioServerTransport());
   return server;
 }

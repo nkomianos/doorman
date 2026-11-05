@@ -15,6 +15,8 @@ import { SCRIPT, runDemo } from './demo.js';
 import { expandEvents, parseIcs } from './ics.js';
 import { listIntegrations, setIntegration } from './integrations.js';
 import { AgentKeys } from './keys.js';
+import { buildMcpServer } from './mcp-server.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createServer } from './server.js';
 import { agentSessions } from './sessions.js';
 import { answerView, findOption } from './spec.js';
@@ -331,7 +333,19 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     return { started: true, asks: SCRIPT.length };
   };
 
-  const server = createServer({ router, token, version: VERSION, getConfig, updateConfig, notifyTest, startDemo, keys, extraRoutes, onShutdown: () => close().then(() => process.exitCode ?? 0) });
+  // MCP over HTTP: one stateless MCP server per request, calling back into this daemon
+  // with the caller's own credential, so an agent key stays scoped to its agent.
+  const mcpHttp = async (req, res, who, credential) => {
+    const client = new DoormanClient({ url: baseUrl(), token: credential, autostart: false });
+    // Tunnels cut long requests (Cloudflare at ~100s), so ask_human returns a pending id sooner.
+    const mcp = buildMcpServer({ client, defaultWaitSeconds: 50, maxWaitSeconds: 90 });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    res.on('close', () => { transport.close(); mcp.close(); });
+    await mcp.connect(transport);
+    await transport.handleRequest(req, res);
+  };
+
+  const server = createServer({ router, token, version: VERSION, getConfig, updateConfig, notifyTest, startDemo, keys, extraRoutes, mcpHttp, remote: () => !!config.remote?.enabled, onShutdown: () => close().then(() => process.exitCode ?? 0) });
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);

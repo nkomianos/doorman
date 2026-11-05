@@ -424,7 +424,7 @@ kbd { display: inline-block; min-width: 20px; text-align: center; font-size: 12p
 .snippet { width: 100%; }
 .snippet summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 0; }
 .snippet[open] summary { color: var(--ink); }
-.mini-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.mini-steps { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: 13.5px; color: var(--ink-2); }
 .mini-steps li.is-done { color: var(--ok); }
 .inline-form { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .inline-form .input { flex: 1; min-width: 200px; }
@@ -444,6 +444,10 @@ kbd { display: inline-block; min-width: 20px; text-align: center; font-size: 12p
 .code-block pre { margin: 0; padding-right: 90px; white-space: pre; overflow-x: auto; }
 .code-block .btn { position: absolute; top: 6px; right: 6px; background: var(--surface); }
 .keys { margin-top: 12px; box-shadow: none; }
+.cloud-agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 16px; }
+.cloud-agents > div { padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); font-size: 13.5px; }
+.cloud-agents p { margin: 4px 0 0; color: var(--ink-2); }
+.mini-steps .cmd { margin: 6px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
