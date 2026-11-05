@@ -50,6 +50,11 @@ const S = {
   calDraft: '',
   calPreview: null,
   snippetLang: 'curl',
+  previews: new Map(), // `${askId}:${i}` -> { state, data | error }
+  previewOpen: new Set(),
+  autoPreviewed: new Set(),
+  noteOpen: new Set(),
+  replyOpen: new Set(),
   settingsDirty: false,
   testResult: null,
   connected: false,
@@ -87,6 +92,10 @@ const PATHS = {
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
   pulse: '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',
+  doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
+  diff: '<path d="M12 4v8M8 8h8M8 18h8"/>',
+  code: '<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>',
+  reply: '<path d="M10 8L5 13l5 5"/><path d="M5 13h9a5 5 0 0 1 5 5v1"/>',
   sound: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
 };
 const I = (name, size = 16) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
@@ -267,10 +276,16 @@ function nextAfter(id) {
 function answer(a, option) {
   const d = S.drafts.get(a.id) || {};
   const label = optLabel(a, option);
+  const note = (d.note || '').trim();
+  if (a.review && option === 'changes' && !note) {
+    toast('Add a comment so the agent knows what to change', { error: true });
+    $(`[data-note="${a.id}"]`)?.focus();
+    return;
+  }
   commitLater(a, {
-    msg: `Sent “${label}” to ${a.agent.name}`,
-    sub: d.always ? 'Saved as a rule: Switchboard will answer this for you next time' : '',
-    run: async () => { await api('POST', `/v1/asks/${a.id}/answer`, { option, always: !!d.always, surface: 'web' }, { keepalive: true }); S.drafts.delete(a.id); },
+    msg: `Sent “${label}”${note ? ' with your note' : ''} to ${a.agent.name}`,
+    sub: d.always ? 'Saved as a rule: Switchboard will answer this for you next time' : note ? `“${trunc(note, 60)}”` : '',
+    run: async () => { await api('POST', `/v1/asks/${a.id}/answer`, { option, text: note || undefined, always: !!d.always, surface: 'web' }, { keepalive: true }); S.drafts.delete(a.id); },
   });
 }
 
@@ -434,6 +449,112 @@ function snoozeMenu(a) {
   </div>`;
 }
 
+// ------------------------------------------------------- docs & previews
+
+/** A small, safe Markdown renderer: everything is escaped first, then formatted. */
+function renderMarkdown(src) {
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  const lines = String(src ?? '').replace(/\r/g, '').split('\n');
+  let html = '';
+  let list = null;
+  let para = [];
+  const flush = () => {
+    if (para.length) { html += `<p>${para.map(inline).join('<br>')}</p>`; para = []; }
+    if (list) { html += `</${list}>`; list = null; }
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fence = /^```\s*([\w-]*)/.exec(line);
+    if (fence) {
+      flush();
+      const code = [];
+      while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i]);
+      html += fence[1] === 'diff' ? renderDiff(code.join('\n')) : `<pre class="code"><code>${esc(code.join('\n'))}</code></pre>`;
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) { flush(); html += `<h${Math.min(6, h[1].length + 2)}>${inline(h[2])}</h${Math.min(6, h[1].length + 2)}>`; continue; }
+    const li = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+    if (li) {
+      if (para.length) flush();
+      const kind = /\d/.test(li[1]) ? 'ol' : 'ul';
+      if (list !== kind) { if (list) html += `</${list}>`; html += `<${kind}>`; list = kind; }
+      html += `<li>${inline(li[2].replace(/^\[( |x)\]\s*/i, (m, x) => (x.trim() ? '☑ ' : '☐ ')))}</li>`;
+      continue;
+    }
+    if (/^>\s?/.test(line)) { flush(); html += `<blockquote>${inline(line.replace(/^>\s?/, ''))}</blockquote>`; continue; }
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flush(); html += '<hr>'; continue; }
+    if (!line.trim()) { flush(); continue; }
+    if (list) { html += `</${list}>`; list = null; }
+    para.push(line);
+  }
+  flush();
+  return `<div class="md">${html}</div>`;
+}
+
+function renderDiff(src) {
+  const rows = String(src ?? '').split('\n').map((l) => {
+    const cls = /^(\+\+\+|---|diff |index )/.test(l) ? 'meta' : l.startsWith('@@') ? 'hunk' : l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : '';
+    return `<span class="${cls}">${esc(l) || ' '}</span>`;
+  });
+  return `<pre class="diff">${rows.join('\n')}</pre>`;
+}
+
+function renderPreview(att, p) {
+  if (!p || p.state === 'loading') return '<p class="help"><span class="spinner inline" aria-hidden="true"></span> Loading…</p>';
+  if (p.state === 'error') return `<div class="callout bad">${I('alert', 16)}<div>${esc(p.error)}</div></div>`;
+  const d = p.data;
+  if (d.error) return `<div class="callout bad">${I('alert', 16)}<div>${esc(d.error)}</div></div>`;
+  if (d.content == null) return `<p class="help">This file type can’t be previewed here.${att.path ? ' Open it to have a look.' : ''}</p>`;
+  const body = att.format === 'markdown' ? renderMarkdown(d.content) : att.format === 'diff' ? renderDiff(d.content) : `<pre class="code"><code>${esc(d.content)}</code></pre>`;
+  return `${body}${d.truncated ? '<p class="help">Showing the first 1 MB.</p>' : ''}`;
+}
+
+async function loadPreview(id, i) {
+  const key = `${id}:${i}`;
+  if (S.previews.get(key)?.state === 'loading') return;
+  S.previews.set(key, { state: 'loading' });
+  scheduleRender();
+  try {
+    S.previews.set(key, { state: 'ok', data: await api('GET', `/v1/asks/${id}/attachments/${i}`) });
+  } catch (err) {
+    S.previews.set(key, { state: 'error', error: err.message });
+  }
+  scheduleRender();
+}
+
+const ATT_ICON = { markdown: 'doc', text: 'doc', diff: 'diff', code: 'code', file: 'doc' };
+function attachmentsBlock(a) {
+  if (!a.attachments?.length) return '';
+  return `<div class="attachments">${a.attachments.map((att, i) => {
+    const key = `${a.id}:${i}`;
+    const open = S.previewOpen.has(key);
+    const where = att.url ? att.url.replace(/^https?:\/\//, '') : att.path ? att.path : att.format === 'diff' ? 'Diff' : 'Document';
+    const actions = att.url
+      ? `<a class="btn sm" href="${esc(att.url)}" target="_blank" rel="noreferrer">${I('link', 14)} Open link</a>`
+      : `<button class="btn sm" data-act="att-preview" data-id="${a.id}" data-i="${i}" aria-expanded="${open}">${open ? 'Hide' : 'Preview'}</button>${att.path ? `<button class="btn ghost sm" data-act="att-open" data-id="${a.id}" data-i="${i}">${I('code', 14)} Open in editor</button>` : ''}`;
+    return `<div class="attachment${open ? ' is-open' : ''}">
+      <div class="att-head"><span class="ico">${I(att.url ? 'link' : ATT_ICON[att.format] || 'doc', 15)}</span><div class="att-title"><b>${esc(att.title)}</b><span class="mono">${esc(trunc(where, 80))}</span></div><div class="form-actions">${actions}</div></div>
+      ${open ? `<div class="att-body">${renderPreview(att, S.previews.get(key))}</div>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+const agentShort = (a) => a.agent.name.split(' · ')[0];
+
+/** What an agent said in its chat, so you can answer without switching to it. */
+function agentMessage(a) {
+  const full = a.detail.full;
+  const long = full.length > 700;
+  const open = S.open.has(`msg:${a.id}`);
+  return `<div class="agent-message${long && !open ? ' clipped' : ''}">${renderMarkdown(long && !open ? `${full.slice(0, 700)}…` : full)}
+    ${long ? `<button class="link-btn" data-act="msg-expand" data-id="${a.id}">${open ? 'Show less' : 'Show the whole message'}</button>` : ''}</div>`;
+}
+
 function askCard(a, sel) {
   const def = defaultOpt(a);
   const draft = S.drafts.get(a.id) || {};
@@ -447,7 +568,12 @@ function askCard(a, sel) {
 
   let body = '';
   if (a.kind === 'decision') {
-    body = `<div class="options" role="group" aria-label="Options">${a.options.map((o, k) => `
+    // A note travels with whichever option you pick; on reviews it's the comments box.
+    const noteOpen = a.review || S.noteOpen.has(a.id) || draft.note;
+    const note = noteOpen
+      ? `<label class="field note"><span>${a.review ? `Comments for ${esc(agentShort(a))}` : 'Note'} <small>${a.review ? 'needed if you request changes' : `sent to ${esc(agentShort(a))} with your answer`}</small></span><textarea class="input" rows="${a.review ? 3 : 2}" data-note="${a.id}" placeholder="${a.review ? 'What should change?' : 'e.g. Use staging instead'}">${esc(draft.note || '')}</textarea></label>`
+      : '';
+    body = `${note}<div class="options" role="group" aria-label="Options">${a.options.map((o, k) => `
       <button class="opt ${esc(o.style || '')}" data-act="answer" data-id="${a.id}" data-opt="${esc(o.id)}" aria-keyshortcuts="${k + 1}">
         <span class="l">${esc(o.label)}${def?.id === o.id ? '<span class="def" title="Applied automatically if you don\'t answer in time">Default</span>' : ''}<span class="k">${k + 1}</span></span>
         ${o.consequence ? `<span class="c">${esc(o.consequence)}</span>` : ''}
@@ -466,8 +592,11 @@ function askCard(a, sel) {
         return `<label class="field"><span>${label}</span><input ${attrs} type="${type}" value="${esc(v)}" placeholder="${esc(p.description || '')}"></label>`;
       }).join('')
       : `<label class="field"><span class="visually-hidden">Your answer</span><textarea rows="2" data-text="${a.id}" placeholder="${esc(a.input?.placeholder || 'Type your answer')}">${esc(draft.text || '')}</textarea></label>`;
-    body = `<div class="form">${fields}<div class="form-actions"><button class="btn primary" data-act="submit" data-id="${a.id}">Send <kbd>Ctrl</kbd><kbd>↵</kbd></button>${a.options.map((o) => `<button class="btn" data-act="answer" data-id="${a.id}" data-opt="${esc(o.id)}">${esc(o.label)}</button>`).join('')}</div></div>`;
+    const sendLabel = a.metadata?.reply ? `Send to ${esc(agentShort(a))}` : 'Send';
+    body = `<div class="form">${fields}<div class="form-actions"><button class="btn primary" data-act="submit" data-id="${a.id}">${sendLabel} <kbd>Ctrl</kbd><kbd>↵</kbd></button>${a.options.map((o) => `<button class="btn" data-act="answer" data-id="${a.id}" data-opt="${esc(o.id)}">${esc(o.label)}</button>`).join('')}</div></div>`;
   }
+  const fromChat = a.metadata?.reply && detail.full;
+  const canNote = a.kind === 'decision' && !a.review && !S.noteOpen.has(a.id) && !draft.note;
 
   const canAlways = a.kind === 'decision' && a.reversible !== false;
   const menuOpen = S.menu?.type === 'snooze' && S.menu.id === a.id;
@@ -481,13 +610,15 @@ function askCard(a, sel) {
       </div>
       ${timer(a)}
     </div>
-    <h2 class="question" id="q-${a.id}">${esc(a.question)}</h2>
+    <h2 class="question" id="q-${a.id}">${a.review ? `<span class="badge review">${I('doc', 12)} Review</span> ` : ''}${esc(a.question)}</h2>
     ${detail.line ? `<p class="subline">${esc(detail.line)}</p>` : ''}
     ${facts.length ? `<div class="facts">${facts.map((f) => `<span>${f}</span>`).join('')}</div>` : ''}
-    ${detail.paragraph || detail.full ? `<details class="more" data-more="${a.id}" ${S.open.has(a.id) ? 'open' : ''}><summary>More context</summary>${detail.paragraph ? `<p>${esc(detail.paragraph)}</p>` : ''}${detail.full ? `<pre class="full">${esc(detail.full)}</pre>` : ''}</details>` : ''}
+    ${fromChat ? agentMessage(a) : a.review && detail.paragraph ? `<p class="subline">${esc(detail.paragraph)}</p>` : detail.paragraph || detail.full ? `<details class="more" data-more="${a.id}" ${S.open.has(a.id) ? 'open' : ''}><summary>More context</summary>${detail.paragraph ? `<p>${esc(detail.paragraph)}</p>` : ''}${detail.full ? `<pre class="full">${esc(detail.full)}</pre>` : ''}</details>` : ''}
+    ${attachmentsBlock(a)}
     ${body}
     <div class="card-foot">
-      ${canAlways ? `<label class="toggle" title="Make a rule: next time this exact request comes in, Switchboard answers the same way without asking you"><input type="checkbox" data-always="${a.id}" ${draft.always ? 'checked' : ''}><span class="sw"></span><span>Always do this${a.fingerprint ? ` for <code>${esc(trunc(a.fingerprint, 40))}</code>` : ''}</span></label>` : ''}
+      ${canNote ? `<button class="btn ghost sm" data-act="note-toggle" data-id="${a.id}">${I('plus', 14)} Add a note</button>` : ''}
+      ${canAlways && !a.review ? `<label class="toggle" title="Make a rule: next time this exact request comes in, Switchboard answers the same way without asking you"><input type="checkbox" data-always="${a.id}" ${draft.always ? 'checked' : ''}><span class="sw"></span><span>Always do this${a.fingerprint ? ` for <code>${esc(trunc(a.fingerprint, 40))}</code>` : ''}</span></label>` : ''}
       <span class="grow"></span>
       <span class="menu-anchor">
         <button class="btn ghost sm" data-act="snooze-menu" data-id="${a.id}" aria-haspopup="menu" aria-expanded="${menuOpen}" aria-keyshortcuts="s">${I('clock', 15)} Snooze</button>
@@ -541,6 +672,32 @@ function viewInbox() {
   return html;
 }
 
+/** Continue an agent's conversation from Switchboard: your message goes into that session. */
+function replyBox(a) {
+  const d = S.drafts.get(a.id) || {};
+  return `<div class="reply-box detail">
+    <label class="field"><span>Reply to ${esc(agentShort(a))} <small>continues the same session${a.metadata.reply.cwd ? ` in <span class="mono">${esc(a.metadata.reply.cwd.split(/[\\/]/).pop())}</span>` : ''}</small></span>
+    <textarea class="input" rows="2" data-reply="${a.id}" placeholder="e.g. Yes, go ahead and open the PR">${esc(d.reply || '')}</textarea></label>
+    <div class="form-actions"><button class="btn primary sm" data-act="reply-send" data-id="${a.id}">${I('reply', 14)} Send to ${esc(agentShort(a))}</button><span class="help" style="margin:0">Its answer comes back here when it’s done.</span></div>
+  </div>`;
+}
+
+async function sendReplyTo(a) {
+  const text = (S.drafts.get(a.id)?.reply || $(`[data-reply="${a.id}"]`)?.value || '').trim();
+  if (!text) { $(`[data-reply="${a.id}"]`)?.focus(); return toast('Type a reply first'); }
+  try {
+    const r = await api('POST', `/v1/asks/${a.id}/reply`, { text });
+    S.replyOpen.delete(a.id);
+    S.drafts.delete(a.id);
+    if (r.queued) toast(`Sending to ${agentShort(a)}…`); // the result arrives as a live event
+    render();
+  } catch (err) { fail(err); }
+}
+
+function replyFailed(r) {
+  toast(`Couldn’t reach ${r.name || 'the agent'}`, { sub: r.error || '', error: true, ms: 10000, action: r.command ? { label: 'Copy command', fn: () => copy(r.command) } : null });
+}
+
 function viewUpdates() {
   const selOn = !!S.selId;
   const items = lists().updates;
@@ -558,10 +715,12 @@ function viewUpdates() {
       ${avatar(a.agent)}
       <div><div class="title unread">${esc(a.question)}</div><div class="sub"><span>${esc(a.agent.name)}</span><span>·</span><span>${fmtAgo(a.created_at)}</span>${a.urgency === 'high' || a.urgency === 'critical' ? '<span class="badge high">Urgent</span>' : ''}</div></div>
       <div class="side">
+        ${a.metadata?.reply ? `<button class="btn ghost sm" data-act="reply-toggle" data-id="${a.id}" aria-expanded="${S.replyOpen.has(a.id)}">${I('reply', 15)} Reply</button>` : ''}
         <button class="btn ghost sm" data-act="ack" data-id="${a.id}" title="Mark read (Enter)">${I('check', 15)} Read</button>
         <button class="icon-btn" data-act="dismiss" data-id="${a.id}" title="Not useful: this agent interrupts you less" aria-label="Not useful">${I('x', 15)}</button>
       </div>
-      ${open && more ? `<div class="detail">${detail.line ? `<p>${esc(detail.line)}</p>` : ''}${detail.paragraph ? `<p>${esc(detail.paragraph)}</p>` : ''}${detail.full ? `<pre class="full">${esc(detail.full)}</pre>` : ''}</div>` : ''}
+      ${open && more ? `<div class="detail">${detail.line ? `<p>${esc(detail.line)}</p>` : ''}${detail.paragraph ? `<p>${esc(detail.paragraph)}</p>` : ''}${detail.full ? (a.metadata?.reply ? renderMarkdown(detail.full) : `<pre class="full">${esc(detail.full)}</pre>`) : ''}</div>` : ''}
+      ${S.replyOpen.has(a.id) ? replyBox(a) : ''}
     </div>`;
   }).join('')}</div>`;
 }
@@ -630,7 +789,7 @@ function viewHistory() {
       <span class="ico ${o.cls}">${I(o.icon, 15)}</span>
       <div><div class="title">${esc(a.question)}</div><div class="sub"><span>${esc(a.agent.name)}</span><span>·</span><span>${esc(o.text)}</span></div></div>
       <div class="side">${fmtTime(t)}</div>
-      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Switchboard pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}${a.status === 'auto' && String(a.answer?.by).startsWith('rule:') && S.rules.some((r) => r.id === a.answer.by.slice(5)) ? `<div class="form-actions"><button class="btn sm" data-act="rule-rm" data-id="${esc(a.answer.by.slice(5))}">Stop answering this for me</button></div>` : ''}</div>` : ''}
+      ${open ? `<div class="detail">${a.delivery?.reason ? `<p>${I('info', 13)} ${esc(`${{ interrupted: 'Pinged you', held: 'Didn’t ping you', digest: 'Went to your digest', auto: 'Handled by a rule', muted: 'Muted', 'settled-before-ping': 'Settled before Switchboard pinged you' }[a.delivery.mode] || a.delivery.mode}: ${a.delivery.reason}`)}</p>` : ''}${a.answer?.option && a.answer?.text ? `<p>${I('reply', 13)} Your note: “${esc(a.answer.text)}”</p>` : ''}${a.reply_result ? (a.reply_result.state === 'failed' ? `<div class="callout bad">${I('alert', 16)}<div>Couldn’t send your reply to ${esc(a.reply_result.name || 'the agent')}: ${esc(a.reply_result.error || '')}${a.reply_result.command ? cmdBox(a.reply_result.command) : ''}</div></div>` : `<p>${I('check', 13)} Your reply went to ${esc(a.reply_result.name || 'the agent')}${a.reply_result.state === 'sending' ? '…' : '.'}</p>`) : ''}${a.detail?.paragraph ? `<p>${esc(a.detail.paragraph)}</p>` : ''}${a.status === 'auto' && String(a.answer?.by).startsWith('rule:') && S.rules.some((r) => r.id === a.answer.by.slice(5)) ? `<div class="form-actions"><button class="btn sm" data-act="rule-rm" data-id="${esc(a.answer.by.slice(5))}">Stop answering this for me</button></div>` : ''}</div>` : ''}
     </div>`;
   }
   return `${html}${rows}</div>`;
@@ -1084,6 +1243,8 @@ function renderStatus() {
 function focusKey(el) {
   if (!el || el === document.body) return null;
   if (el.dataset.text) return `[data-text="${el.dataset.text}"]`;
+  if (el.dataset.note) return `[data-note="${el.dataset.note}"]`;
+  if (el.dataset.reply) return `[data-reply="${el.dataset.reply}"]`;
   if (el.dataset.field) return `[data-id="${el.dataset.id}"][data-field="${el.dataset.field}"]`;
   if (el.dataset.histSearch !== undefined) return '[data-hist-search]';
   if (el.dataset.act) {
@@ -1122,6 +1283,16 @@ function render() {
   }[S.view]();
   main.innerHTML = html;
   tick();
+  // Reviews open with their document already showing.
+  if (['inbox', 'snoozed'].includes(S.view)) {
+    for (const a of currentList()) {
+      const i = a.review ? (a.attachments || []).findIndex((x) => !x.url) : -1;
+      if (i < 0 || S.autoPreviewed.has(a.id)) continue;
+      S.autoPreviewed.add(a.id);
+      S.previewOpen.add(`${a.id}:${i}`);
+      loadPreview(a.id, i);
+    }
+  }
   if (key) {
     const el = main.querySelector(key);
     if (el) {
@@ -1242,7 +1413,7 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
-  if (b.dataset.act === 'toggle' && t.closest('button:not([data-act="toggle"])')) return;
+  if (b.dataset.act === 'toggle' && t.closest('button:not([data-act="toggle"]),textarea,input,select,a,.reply-box')) return;
   const id = b.dataset.id;
   const a = id ? S.asks.get(id) : null;
   switch (b.dataset.act) {
@@ -1259,6 +1430,24 @@ document.addEventListener('click', async (e) => {
       return;
     case 'snooze-at': return a && snooze(a, snoozeChoices(a)[Number(b.dataset.i)]);
     case 'unsnooze': return a && unsnooze(a);
+    case 'note-toggle': S.noteOpen.add(id); render(); $(`[data-note="${id}"]`)?.focus(); return undefined;
+    case 'msg-expand': { const k = `msg:${id}`; S.open.has(k) ? S.open.delete(k) : S.open.add(k); return render(); }
+    case 'att-preview': {
+      const key = `${id}:${b.dataset.i}`;
+      if (S.previewOpen.has(key)) S.previewOpen.delete(key);
+      else { S.previewOpen.add(key); if (!S.previews.has(key)) loadPreview(id, Number(b.dataset.i)); }
+      return render();
+    }
+    case 'att-open':
+      try { const r = await api('POST', `/v1/asks/${id}/attachments/${b.dataset.i}/open`); toast(`Opened in ${r.opened}`); } catch (err) { fail(err); }
+      return undefined;
+    case 'reply-toggle':
+      e.stopPropagation();
+      S.replyOpen.has(id) ? S.replyOpen.delete(id) : S.replyOpen.add(id);
+      render();
+      $(`[data-reply="${id}"]`)?.focus();
+      return undefined;
+    case 'reply-send': e.stopPropagation(); return a && sendReplyTo(a);
     case 'toggle':
       S.open.has(id) ? S.open.delete(id) : S.open.add(id);
       S.selId = id;
@@ -1398,6 +1587,8 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.dataset.text) S.drafts.set(t.dataset.text, { ...S.drafts.get(t.dataset.text), text: t.value });
+  if (t.dataset.note) S.drafts.set(t.dataset.note, { ...S.drafts.get(t.dataset.note), note: t.value });
+  if (t.dataset.reply) S.drafts.set(t.dataset.reply, { ...S.drafts.get(t.dataset.reply), reply: t.value });
   if (t.dataset.field) {
     const d = S.drafts.get(t.dataset.id) || {};
     S.drafts.set(t.dataset.id, { ...d, values: { ...d.values, [t.dataset.field]: t.type === 'checkbox' ? t.checked : t.value } });
@@ -1583,6 +1774,11 @@ function connect() {
   es.addEventListener('update', upsert);
   es.addEventListener('state', async () => { await loadState().catch(() => {}); scheduleRender(); });
   es.addEventListener('rules', async () => { await loadRules().catch(() => {}); scheduleRender(); });
+  es.addEventListener('reply', (e) => {
+    const r = JSON.parse(e.data);
+    if (r.state === 'sent') toast(`Sent to ${r.name}`, { sub: 'Its answer will show up here when it’s done' });
+    else if (r.state === 'failed') replyFailed(r);
+  });
   es.addEventListener('config', async () => {
     const wasPaired = !!S.config?.telegram?.paired;
     await loadConfig().catch(() => {});

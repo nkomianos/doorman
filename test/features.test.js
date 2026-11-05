@@ -215,7 +215,7 @@ describe('agent keys (live daemon)', () => {
     await mcp.connect(new StreamableHTTPClientTransport(new URL(`${d.url}/mcp?key=${k.key}`)));
     try {
       const { tools } = await mcp.listTools();
-      assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human']);
+      assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human', 'request_review']);
       const r = await mcp.callTool({ name: 'ask_human', arguments: { question: 'Post the thread on X?', options: ['Post', 'Hold'], default: 'Hold', deadline: '1h', wait_seconds: 0 } });
       const view = JSON.parse(r.content[0].text);
       assert.equal(view.status, 'pending');
@@ -304,5 +304,96 @@ describe('Telegram bot', () => {
       api.close();
       api.closeAllConnections?.();
     }
+  });
+});
+
+describe('reviews, notes and replies', () => {
+  test('a review is a decision with Approve / Request changes and attachments', async () => {
+    const { normalizeAsk } = await import('../src/spec.js');
+    const a = normalizeAsk({ agent: 'writer', kind: 'review', question: 'Review the launch post?', attachments: ['docs/post.md', 'https://github.com/x/y/pull/1', { content: '+ added\n- removed', format: 'diff', title: 'Changes' }] });
+    assert.equal(a.kind, 'decision');
+    assert.equal(a.review, true);
+    assert.deepEqual(a.options.map((o) => o.id), ['approve', 'changes']);
+    assert.deepEqual(a.attachments.map((x) => x.format), ['markdown', null, 'diff']);
+    assert.equal(a.attachments[0].title, 'post.md');
+    assert.throws(() => normalizeAsk({ agent: 'w', kind: 'review', question: 'x?', attachments: [{ title: 'nothing' }] }), /needs a path, url or content/);
+  });
+
+  test('reviews are never offered as automatic rules', () => {
+    const r = new Router({ config: { bundleWindowMs: 0, digest: { times: [] } } });
+    for (let i = 0; i < 4; i++) r.answer(r.submit({ agent: 'writer', kind: 'review', question: 'Review the post?', attachments: [{ content: 'hi' }] }).id, { option: 'approve' });
+    assert.equal(r.suggestions.size, 0);
+  });
+
+  test('a note travels with the answer, and a Claude Code denial passes it on', async () => {
+    const { answerView } = await import('../src/spec.js');
+    const { permissionOutput } = await import('../src/hooks.js');
+    const r = new Router({ config: { bundleWindowMs: 0, digest: { times: [] } } });
+    const a = r.submit({ agent: 'coder', question: 'Run migrations on prod?', options: ['Allow', 'Deny'] });
+    r.answer(a.id, { option: 'deny', text: 'Use staging first' });
+    const v = answerView(a);
+    assert.equal(v.answer.text, 'Use staging first');
+    assert.match(permissionOutput(v).hookSpecificOutput.decision.message, /Use staging first/);
+  });
+
+  test('resuming a session: message on stdin, a clear error when the CLI is missing', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { resumeSession, manualCommand } = await import('../src/resume.js');
+    const fake = (behaviour) => (cmd, args) => {
+      const child = new EventEmitter();
+      child.stdin = { written: '', on() {}, end(t) { this.written = t; } };
+      child.stderr = new EventEmitter();
+      child.args = [cmd, ...args];
+      setTimeout(() => {
+        child.emit('spawn');
+        if (behaviour === 'missing') { child.stderr.emit('data', "'codex' is not recognized as an internal or external command"); child.emit('exit', 1); }
+      }, 5);
+      fake.last = child;
+      return child;
+    };
+    const ok = await resumeSession({ via: 'codex', session: 'abc-123', cwd: null }, 'Yes, open the PR', { spawnImpl: fake('ok'), settleMs: 30 });
+    assert.equal(ok.ok, true);
+    assert.deepEqual(fake.last.args, ['codex', 'exec', 'resume', 'abc-123', '-']);
+    assert.equal(fake.last.stdin.written, 'Yes, open the PR');
+    const bad = await resumeSession({ via: 'codex', session: 'abc-123' }, 'hi', { spawnImpl: fake('missing'), settleMs: 200 });
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /Codex CLI not found/);
+    assert.match(manualCommand({ via: 'claude-code', session: 's1', cwd: '/code/api' }, 'go'), /^cd "\/code\/api" && claude -p --resume s1 "go"$/);
+    assert.equal((await resumeSession({ via: 'codex', session: 'x; rm -rf /' }, 'hi')).ok, false, 'odd session ids are refused');
+  });
+});
+
+describe('reviews and replies (live daemon)', () => {
+  let d;
+  let owner;
+  before(async () => {
+    d = await startDaemon({ home: tmp('review'), port: 0, overrides: { desktop: false, noProtocol: true, bundleWindowMs: 100, digest: { times: [], onBreak: true } }, log: () => {}, quiet: true, tickMs: 50 });
+    owner = new SwitchboardClient({ url: d.url, token: d.token });
+  });
+  after(() => d.close());
+
+  test('attachments preview for the owner; agent keys cannot attach local files', async () => {
+    const file = join(tmp('doc'), 'plan.md');
+    writeFileSync(file, '# Plan\n\n- step one\n');
+    const a = await owner.submit({ agent: 'planner', kind: 'review', question: 'Review the plan?', attachments: [{ path: file }, { content: 'inline **doc**' }] });
+    const p0 = await owner.request('GET', `/v1/asks/${a.id}/attachments/0`);
+    assert.equal(p0.content, '# Plan\n\n- step one\n');
+    assert.equal(p0.format, 'markdown');
+    assert.equal((await owner.request('GET', `/v1/asks/${a.id}/attachments/1`)).content, 'inline **doc**');
+    const k = await owner.request('POST', '/v1/keys', { name: 'Cloud writer' });
+    const agent = new SwitchboardClient({ url: d.url, token: k.key });
+    await assert.rejects(agent.submit({ kind: 'review', question: 'Read this?', attachments: [{ path: 'C:/Users/me/.ssh/id_rsa' }] }), (e) => e.status === 400);
+    assert.equal((await agent.submit({ kind: 'review', question: 'Read this?', attachments: [{ content: 'fine' }] })).status, 'pending');
+  });
+
+  test('replying to an agent message tries to resume that session and records the outcome', async () => {
+    const a = await owner.submit({ agent: { id: 'claude-code-api', name: 'Claude Code · api' }, kind: 'inform', question: 'Finished in api: done', metadata: { reply: { via: 'claude-code', session: 'no-such-session', cwd: null } } });
+    const r = await owner.request('POST', `/v1/asks/${a.id}/reply`, { text: 'Thanks, now add tests' });
+    assert.ok(['sent', 'failed'].includes(r.state));
+    if (r.state === 'failed') assert.ok(r.command.includes('--resume no-such-session'));
+    const after = (await owner.request('GET', `/v1/asks/${a.id}`)).ask;
+    assert.equal(after.status, 'read');
+    assert.equal(after.reply_result.state, r.state);
+    await assert.rejects(owner.request('POST', `/v1/asks/${a.id}/reply`, { text: '' }), (e) => e.status === 400);
   });
 });

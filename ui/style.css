@@ -490,3 +490,42 @@ kbd { display: inline-block; min-width: 20px; text-align: center; font-size: 12p
   .toasts { bottom: 12px; }
   .toast { min-width: 0; width: calc(100vw - 24px); }
 }
+
+/* --------------------------------------- documents, reviews, agent messages */
+.badge.review { background: var(--accent-soft); color: var(--accent-text); vertical-align: 3px; font-size: 11.5px; }
+.agent-message { margin: 10px 0 4px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border-left: 3px solid var(--line-strong); font-size: 14px; }
+.agent-message.clipped { position: relative; }
+.agent-message .link-btn { margin-top: 6px; font-size: 13px; }
+.attachments { display: grid; gap: 8px; margin: 12px 0 4px; }
+.attachment { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+.attachment.is-open { border-color: var(--line-strong); }
+.att-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; }
+.att-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.att-title b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-title .mono { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-body { border-top: 1px solid var(--line); padding: 14px 16px; max-height: 520px; overflow: auto; background: var(--surface); }
+.note { margin: 12px 0 0; }
+.note textarea { min-height: 52px; }
+.reply-box { display: grid; gap: 8px; padding-top: 4px; }
+.reply-box .field { color: var(--ink-2); }
+
+.md { font-size: 14.5px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 10px; }
+.md h3, .md h4, .md h5, .md h6 { margin: 16px 0 6px; line-height: 1.3; }
+.md h3 { font-size: 18px; } .md h4 { font-size: 16px; } .md h5, .md h6 { font-size: 14.5px; }
+.md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md blockquote { margin: 0 0 10px; padding: 2px 12px; border-left: 3px solid var(--line-strong); color: var(--ink-2); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+pre.code, pre.diff { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; overflow: auto; white-space: pre; }
+pre.diff span { display: inline-block; min-width: 100%; }
+pre.diff .add { background: var(--ok-soft); color: var(--ok); }
+pre.diff .del { background: var(--danger-soft); color: var(--danger); }
+pre.diff .hunk { color: var(--info); }
+pre.diff .meta { color: var(--muted); font-weight: 600; }
+@media (max-width: 560px) {
+  .att-head { grid-template-columns: auto minmax(0, 1fr); }
+  .att-head .form-actions { grid-column: 1 / -1; }
+}

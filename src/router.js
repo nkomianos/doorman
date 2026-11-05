@@ -74,11 +74,13 @@ export class Router extends EventEmitter {
     this.ledger.append('ask.created', summarize(ask));
     this.emit('ask', ask);
 
-    // Like a mobile push collapse_key: a newer FYI replaces the unread older one.
+    // Like a mobile push collapse_key: a newer message from the same agent replaces the open older one.
     if (ask.collapse_key) {
       for (const old of this.asks.values()) {
-        if (old !== ask && isOpen(old) && old.kind === 'inform' && old.agent.id === ask.agent.id && old.collapse_key === ask.collapse_key) {
-          this._finalize(old, 'read', { by: 'collapsed', surface: 'router', replaced_by: ask.id });
+        if (old !== ask && isOpen(old) && old.agent.id === ask.agent.id && old.collapse_key === ask.collapse_key) {
+          // An unread update is simply replaced; an unanswered question is withdrawn because the agent moved on.
+          if (old.kind === 'inform') this._finalize(old, 'read', { by: 'collapsed', surface: 'router', replaced_by: ask.id });
+          else this._finalize(old, 'cancelled', { by: 'agent', reason: 'replaced by a newer message', replaced_by: ask.id });
         }
       }
     }
@@ -421,7 +423,7 @@ export class Router extends EventEmitter {
   _learn(ask, opt) {
     this.answerLog.push({ agent: ask.agent.id, fp: ask.fingerprint, option: opt.id, irreversible: ask.reversible === false, at: this.clock() });
     if (this.answerLog.length > 300) this.answerLog.splice(0, this.answerLog.length - 300);
-    if (ask.reversible === false) return; // never suggest automating irreversible decisions
+    if (ask.reversible === false || ask.review) return; // never suggest automating irreversible decisions or reviews
     if (!this._learnExact(ask, opt)) this._learnPattern(ask, opt);
   }
 

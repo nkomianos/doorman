@@ -4,6 +4,53 @@ import { slug, truncate } from './util.js';
 
 const RISKY = /\b(rm|rmdir|del|drop|truncate|shred|mkfs|dd|push|deploy|publish|release|chmod|chown|kill)\b|reset\s+--hard|--force|curl[^|]*\|\s*(ba)?sh/i;
 
+/** Does an agent's final message end by asking you something? */
+export function endsWithQuestion(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (/\?[\s*_`)"'’”]*$/.test(t)) return true;
+  const last = t.split(/\n\s*\n/).pop().slice(-500);
+  return /\?/.test(last) || /\b(should I|shall I|do you want|would you like|want me to|which (one|option|approach)|please (confirm|choose|decide)|your call)\b/i.test(last);
+}
+
+/** The question itself, for the one-line title. */
+export function lastQuestion(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const line = lines.findLast((l) => l.includes('?')) || lines.at(-1) || '';
+  const asked = line.match(/[^.!?]*\?/g);
+  const q = asked?.at(-1)?.trim() || line.split(/(?<=[.!?])\s+/).at(-1) || line;
+  return q.replace(/^[*_`#>\-\d.)\s]+/, '').replace(/[*_`]+$/, '');
+}
+
+/**
+ * A finished turn becomes something you can reply to: a question (pings you, like a
+ * decision) if the agent ended by asking something, otherwise an update. Either way
+ * metadata.reply says how to resume that exact session with your answer.
+ */
+function finishedTurn({ agent, project, message, via, session, cwd, name }) {
+  const msg = String(message || 'turn complete');
+  const reply = session ? { via, session, cwd: cwd || null } : null;
+  const base = {
+    agent,
+    detail: { full: message || null },
+    thread: session ? `${via}:${session}` : null,
+    // A newer turn from the same session replaces the older question or update.
+    collapse_key: session ? `${via}-turn:${session}` : null,
+    metadata: reply ? { reply } : null,
+  };
+  if (reply && endsWithQuestion(msg)) {
+    return {
+      ...base,
+      kind: 'input',
+      question: truncate(`${project}: ${lastQuestion(msg)}`, 300),
+      input: { type: 'text', placeholder: `Reply to ${name}…` },
+      urgency: 'normal',
+      tags: [via, 'question'],
+    };
+  }
+  return { ...base, kind: 'inform', question: `Finished in ${project}: ${truncate(msg.replace(/\s+/g, ' '), 160)}`, urgency: 'normal', tags: [via, 'done'] };
+}
+
 function claudeAgent(p) {
   const project = p.cwd ? basename(p.cwd) : 'session';
   return { id: `claude-code-${slug(project)}`, name: `Claude Code · ${project}`, instance: p.session_id || null };
@@ -61,7 +108,9 @@ export function permissionOutput(view) {
     ? 'The human dismissed this request via Switchboard. Do not retry it; continue another way or ask with more context.'
     : view.answer?.by?.startsWith('rule:')
       ? 'Denied by one of the human\'s Switchboard rules.'
-      : 'The human denied this via Switchboard.';
+      : view.answer?.text
+        ? `The human denied this via Switchboard, and said: "${view.answer.text}". Do what they asked instead.`
+        : 'The human denied this via Switchboard.';
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message } } };
 }
 
@@ -71,16 +120,7 @@ export function claudeInform(p) {
   const project = p.cwd ? basename(p.cwd) : 'session';
   if (p.hook_event_name === 'Stop') {
     if (p.stop_hook_active) return null;
-    return {
-      agent,
-      kind: 'inform',
-      question: `Finished in ${project}: ${truncate((p.last_assistant_message || 'turn complete').replace(/\s+/g, ' '), 160)}`,
-      urgency: 'normal',
-      detail: { full: p.last_assistant_message || null },
-      thread: p.session_id ? `claude:${p.session_id}` : null,
-      collapse_key: p.session_id ? `claude-stop:${p.session_id}` : null,
-      tags: ['claude-code', 'done'],
-    };
+    return finishedTurn({ agent, project, message: p.last_assistant_message, via: 'claude-code', session: p.session_id, cwd: p.cwd, name: 'Claude' });
   }
   if (p.hook_event_name === 'Notification') {
     // Permission prompts arrive through PermissionRequest; idle prompts duplicate Stop.
@@ -120,15 +160,14 @@ export async function runClaudeHook(payload, { client, waitSeconds = 600, signal
 export function codexInform(p) {
   if (p?.type !== 'agent-turn-complete') return null;
   const project = p.cwd ? basename(p.cwd) : 'codex';
-  const thread = p['thread-id'] || p['turn-id'] || null;
-  return {
-    agent: { id: `codex-${slug(project)}`, name: `Codex · ${project}`, instance: thread },
-    kind: 'inform',
-    question: `Finished in ${project}: ${truncate(String(p['last-assistant-message'] || 'turn complete').replace(/\s+/g, ' '), 160)}`,
-    urgency: 'normal',
-    detail: { full: p['last-assistant-message'] || null },
-    thread: thread ? `codex:${thread}` : null,
-    collapse_key: thread ? `codex-turn:${thread}` : null,
-    tags: ['codex', 'done'],
-  };
+  const session = p['thread-id'] || null;
+  return finishedTurn({
+    agent: { id: `codex-${slug(project)}`, name: `Codex · ${project}`, instance: session },
+    project,
+    message: p['last-assistant-message'],
+    via: 'codex',
+    session,
+    cwd: p.cwd,
+    name: 'Codex',
+  });
 }

@@ -136,10 +136,15 @@ export class Telegram {
   _askText(a, now = Date.now()) {
     const tag = URGENCY_TAG[a.urgency];
     const head = `<b>${html(a.agent.name)}</b>${tag ? ` · ${tag}` : ''}${a.reversible === false ? ' · can’t be undone' : ''}`;
-    if (this.cfg.redact) return `${head}\nNeeds a decision. Open your Switchboard inbox to see it.`;
-    const lines = [head, html(a.question)];
+    if (this.cfg.redact) return `${head}\n${a.kind === 'inform' ? 'Sent you an update.' : 'Needs you.'} Open your Switchboard inbox to see it.`;
+    const replyTo = a.metadata?.reply;
+    // A message from an agent's chat: show what it actually said, not just the one-line summary.
+    const lines = [head, replyTo && a.detail?.full ? html(truncate(a.detail.full, 1500)) : html(a.question)];
+    if (a.review) lines[1] = `📝 <b>Review:</b> ${html(a.question)}`;
     if (a.detail?.line) lines.push(`<i>${html(a.detail.line)}</i>`);
-    if (a.kind === 'decision') {
+    if (a.review && a.detail?.paragraph) lines.push(html(truncate(a.detail.paragraph, 600)));
+    for (const att of a.attachments || []) if (att.url) lines.push(`🔗 <a href="${html(att.url)}">${html(att.title)}</a>`);
+    if (a.kind === 'decision' && !a.review) {
       const cons = a.options.filter((o) => o.consequence).map((o) => `• <b>${html(o.label)}</b>: ${html(o.consequence)}`);
       if (cons.length) lines.push(cons.join('\n'));
     }
@@ -147,7 +152,10 @@ export class Telegram {
       const def = a.default?.option ? findOption(a, a.default.option)?.label : null;
       lines.push(def ? `⏱ “${html(def)}” in ${fmtDuration(a.deadline - now)} if you don’t answer` : `⏱ needs an answer in ${fmtDuration(a.deadline - now)}`);
     }
-    if (a.kind === 'input') lines.push('<i>Reply to this message to answer.</i>');
+    if (replyTo) lines.push(`<i>Reply to this message to answer ${a.agent.name.split(' · ')[0]}.</i>`);
+    else if (a.kind === 'input') lines.push('<i>Reply to this message to answer.</i>');
+    else if (a.review) lines.push('<i>Reply with your comments, then tap Approve or Request changes.</i>');
+    else if (a.kind === 'decision') lines.push('<i>Tap an option. To add a note, reply to this message first.</i>');
     return lines.join('\n');
   }
 
@@ -167,17 +175,39 @@ export class Telegram {
         this.byMessage.delete(this.messages.get(oldest));
         this.messages.delete(oldest);
       }
+      // Documents to review come along as files under the message.
+      if (!this.cfg.redact) {
+        for (const att of (a.attachments || []).slice(0, 3)) {
+          const file = this.hooks.attachmentFile?.(att);
+          if (file) await this.sendDocument(file, { replyTo: msg.message_id }).catch((err) => this.log(`telegram: ${err.message}`));
+        }
+      }
     }
     return msg;
   }
 
-  /** Deliver one interruption: each decision gets its own message with buttons; FYIs are summarised. */
+  async sendDocument(file, { caption, replyTo } = {}) {
+    if (!this.paired) return null;
+    const form = new FormData();
+    form.append('chat_id', String(this.cfg.chatId));
+    form.append('document', new Blob([file.data]), file.name);
+    if (caption) form.append('caption', caption.slice(0, 1000));
+    if (replyTo) form.append('reply_to_message_id', String(replyTo));
+    form.append('disable_notification', 'true');
+    const res = await fetch(`${this.base}/bot${this.cfg.token}/sendDocument`, { method: 'POST', body: form, signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(60000)]) });
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok) throw new Error(`telegram sendDocument: ${data.description || `HTTP ${res.status}`}`);
+    return data.result;
+  }
+
+  /** Deliver one interruption: decisions and messages you can reply to each get their own message; other FYIs are summarised. */
   async deliver(n) {
-    const decisions = n.asks.filter((a) => a.kind !== 'inform').slice(0, 5);
+    const own = (a) => a.kind !== 'inform' || a.metadata?.reply;
+    const decisions = n.asks.filter(own).slice(0, 5);
     for (const a of decisions) await this.sendAsk(a);
-    const more = n.asks.filter((a) => a.kind !== 'inform').length - decisions.length;
-    if (more > 0) await this.send(`…and ${more} more decision${more === 1 ? '' : 's'} in your inbox. Send /inbox to see them here.`, { disable_notification: true });
-    const fyi = [...n.asks.filter((a) => a.kind === 'inform'), ...(n.digest || [])];
+    const more = n.asks.filter(own).length - decisions.length;
+    if (more > 0) await this.send(`…and ${more} more in your inbox. Send /inbox to see them here.`, { disable_notification: true });
+    const fyi = [...n.asks.filter((a) => !own(a)), ...(n.digest || [])];
     if (fyi.length) {
       const lines = fyi.slice(0, 10).map((a) => `• <b>${html(a.agent.name)}</b>: ${this.cfg.redact ? 'update' : html(truncate(a.question, 120))}`);
       if (fyi.length > 10) lines.push(`…and ${fyi.length - 10} more`);

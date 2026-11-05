@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, openSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SwitchboardClient } from '../src/client.js';
 import { VERSION, switchboardHome, ensureHome, loadConfig, paths } from '../src/config.js';
@@ -27,6 +27,7 @@ You
 Agents
   switchboard ask "Question?" -o Yes -o No [--urgency high] [--deadline 10m] [--default No]
                                            Blocks, prints the answer (scriptable)
+  switchboard review <file|url> [--title "…"]  Ask for a review; exit 0 approved, 1 changes requested
   switchboard notify "Message" [--urgency low]
   switchboard mcp                              MCP server: ask_human, notify_human, get_human_state
   switchboard proxy [--name x] [--gate "delete_*"] -- <mcp server command...>
@@ -146,6 +147,28 @@ async function cmdAsk(args) {
   if (args.flags.json) console.log(JSON.stringify(v, null, 2));
   else console.log(v.answer?.label ?? v.answer?.text ?? v.status);
   process.exit({ answered: 0, auto: 0, defaulted: 0, dismissed: 1 }[v.status] ?? 2);
+}
+
+/** switchboard review <file|url> [--title "…"]: blocks until approved (exit 0) or changes are requested (exit 1). */
+async function cmdReview(args) {
+  const target = args._[0];
+  if (!target) die('usage: switchboard review <file or url> [--title "Review the plan?"] [--deadline 2h]');
+  const isUrl = /^https?:\/\//i.test(target);
+  const path = isUrl ? null : resolve(target);
+  if (path && !existsSync(path)) die(`no such file: ${target}`);
+  const c = new SwitchboardClient();
+  const v = await c.ask({
+    agent: args.flags.agent ? String(args.flags.agent) : process.env.SWITCHBOARD_AGENT ? undefined : { id: 'cli', name: 'Terminal' },
+    kind: 'review',
+    question: args.flags.title ? String(args.flags.title) : `Review ${isUrl ? target : basename(path)}?`,
+    detail: args.flags.detail ? String(args.flags.detail) : undefined,
+    urgency: args.flags.urgency,
+    deadline: args.flags.deadline,
+    attachments: [isUrl ? { url: target } : { path }],
+  }, { timeoutMs: args.flags.timeout ? Number(String(args.flags.timeout).replace(/s$/, '')) * 1000 : Infinity });
+  if (args.flags.json) console.log(JSON.stringify(v, null, 2));
+  else console.log(`${v.answer?.label ?? v.status}${v.answer?.text ? `: ${v.answer.text}` : ''}`);
+  process.exit(v.answer?.option === 'approve' ? 0 : v.answer?.option === 'changes' ? 1 : 2);
 }
 
 async function cmdRules(args) {
@@ -339,6 +362,7 @@ async function main() {
       return console.log(r.delivered ? 'digest delivered' : 'digest is empty');
     }
     case 'ask': return cmdAsk(args);
+    case 'review': return cmdReview(args);
     case 'notify': {
       const r = await new SwitchboardClient().notify(args._.join(' '), { agent: args.flags.agent ? String(args.flags.agent) : { id: 'cli', name: 'Terminal' }, urgency: args.flags.urgency || 'normal' });
       return console.log(`${r.id}: ${r.delivery?.mode} (${r.delivery?.reason})`);

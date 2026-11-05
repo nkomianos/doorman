@@ -67,6 +67,42 @@ function normalizeInput(raw, errors) {
   return { type: schema ? 'form' : 'text', placeholder: str(raw.placeholder), schema };
 }
 
+// kind: "review" is a decision with these defaults, plus attachments to look at.
+const REVIEW_OPTIONS = [
+  { id: 'approve', label: 'Approve', style: 'primary', consequence: 'The agent goes ahead' },
+  { id: 'changes', label: 'Request changes', consequence: 'Your comments go back to the agent' },
+];
+const FORMATS = ['markdown', 'text', 'diff', 'code', 'file'];
+const EXT_FORMAT = { md: 'markdown', markdown: 'markdown', mdx: 'markdown', diff: 'diff', patch: 'diff', txt: 'text', log: 'text', csv: 'text' };
+const TEXT_EXT = /\.(js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|swift|c|h|cpp|cs|php|sh|ps1|sql|json|yaml|yml|toml|ini|html|css|scss|xml|vue|svelte)$/i;
+
+export function formatFor(path) {
+  const ext = String(path).split('.').pop().toLowerCase();
+  if (EXT_FORMAT[ext]) return EXT_FORMAT[ext];
+  return TEXT_EXT.test(path) ? 'code' : 'file';
+}
+
+/** Things to look at: a local file, a link, or inline content (a doc, a diff). */
+function normalizeAttachments(raw, errors) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) {
+    errors.push('attachments must be an array');
+    return [];
+  }
+  if (raw.length > 10) errors.push('at most 10 attachments');
+  return raw.slice(0, 10).map((a, i) => {
+    if (typeof a === 'string') a = /^https?:\/\//i.test(a) ? { url: a } : { path: a };
+    const out = { title: str(a?.title), path: str(a?.path), url: str(a?.url), content: a?.content == null ? null : String(a.content), format: str(a?.format) };
+    if (!out.path && !out.url && out.content == null) errors.push(`attachment ${i + 1} needs a path, url or content`);
+    if (out.url && !/^https?:\/\//i.test(out.url)) errors.push(`attachment ${i + 1}: url must start with http(s)://`);
+    if (out.content != null && out.content.length > 200000) errors.push(`attachment ${i + 1}: content must be ≤ 200,000 characters; attach a file path instead`);
+    if (out.format && !FORMATS.includes(out.format)) errors.push(`attachment ${i + 1}: format must be one of ${FORMATS.join(', ')}`);
+    out.format ||= out.path ? formatFor(out.path) : out.content != null ? 'markdown' : null;
+    out.title ||= out.path ? out.path.split(/[\\/]/).pop() : out.url || `Attachment ${i + 1}`;
+    return out;
+  });
+}
+
 function normalizeDetail(raw) {
   if (raw == null) return { line: null, paragraph: null, full: null };
   if (typeof raw === 'string') return { line: null, paragraph: raw, full: null };
@@ -84,10 +120,11 @@ export function findOption(ask, ref) {
 export function normalizeAsk(input, now = Date.now()) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new SpecError(['body must be a JSON object']);
   const errors = [];
-  const options = normalizeOptions(input.options, errors);
+  const review = input.kind === 'review';
+  const options = normalizeOptions(review && input.options == null ? REVIEW_OPTIONS : input.options, errors);
   const inputSpec = normalizeInput(input.input, errors);
-  const kind = input.kind ?? (options.length ? 'decision' : inputSpec ? 'input' : 'inform');
-  if (!KINDS.includes(kind)) errors.push(`kind must be one of ${KINDS.join(', ')}`);
+  const kind = review ? 'decision' : input.kind ?? (options.length ? 'decision' : inputSpec ? 'input' : 'inform');
+  if (!KINDS.includes(kind)) errors.push(`kind must be one of ${KINDS.join(', ')}, review`);
   if (kind === 'decision' && options.length < 2) errors.push('a decision needs at least 2 options');
   if (kind === 'input' && !inputSpec) errors.push('an input ask needs an `input` field');
 
@@ -116,6 +153,8 @@ export function normalizeAsk(input, now = Date.now()) {
     reversible: typeof input.reversible === 'boolean' ? input.reversible : null,
     delay_cost: str(input.delay_cost),
     detail: normalizeDetail(input.detail),
+    review,
+    attachments: normalizeAttachments(input.attachments, errors),
     thread: str(input.thread),
     collapse_key: str(input.collapse_key),
     tags: Array.isArray(input.tags) ? input.tags.map(String).slice(0, 10) : [],

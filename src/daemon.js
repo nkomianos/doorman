@@ -24,6 +24,8 @@ import { HumanState, MODES, fetchIcs } from './state.js';
 import { Telegram } from './telegram.js';
 import { fmtDuration, parseDuration, randomToken } from './util.js';
 import { actionUrl, registerProtocol } from './winproto.js';
+import { attachmentFile, openAttachment, previewAttachment } from './attachments.js';
+import { resumeSession } from './resume.js';
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
@@ -104,6 +106,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   // Telegram: your own bot, paired to your chat with a one-time code.
   let telegram = null;
   let pairCode = null;
+  const telegramNotes = new Map(); // ask id -> note you replied with, used when you tap an option
   const startTelegram = () => {
     telegram?.close();
     telegram = null;
@@ -123,14 +126,29 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
         const a = router.get(askId);
         const opt = a?.options?.[idx];
         if (!opt) return { toast: 'That request is gone' };
+        const note = telegramNotes.get(askId);
         try {
-          router.answer(askId, { option: opt.id, surface: 'telegram' });
-          return { toast: `Sent “${opt.label}”` };
+          router.answer(askId, { option: opt.id, text: note, surface: 'telegram' });
+          telegramNotes.delete(askId);
+          return { toast: `Sent “${opt.label}”${note ? ' with your note' : ''}` };
         } catch (err) { return { toast: err.status === 409 ? 'Already settled' : err.message }; }
       },
-      onText: (askId, text) => {
-        try { router.answer(askId, { text, surface: 'telegram' }); } catch (err) { telegram.send(err.message).catch(() => {}); }
+      // A text reply: answers a question, goes back into an agent's session, or becomes the note on a decision.
+      onText: async (askId, text) => {
+        const a = router.get(askId);
+        try {
+          if (!a) throw new Error('That request is gone.');
+          if (a.kind === 'decision' && a.status === 'pending') {
+            telegramNotes.set(askId, text);
+            await telegram.send(a.review ? '📝 Comments saved. Now tap Approve or Request changes.' : '📝 Note saved. Now tap an option.');
+          } else if (a.metadata?.reply && a.kind === 'inform') {
+            if (a.status === 'unread') router.ack(askId, { surface: 'telegram' });
+            a.answer = { ...(a.answer || {}), surface: 'telegram' };
+            await sendReply(a, text);
+          } else router.answer(askId, { text, surface: 'telegram' });
+        } catch (err) { telegram.send(err.status === 409 ? 'That’s already settled.' : err.message).catch(() => {}); }
       },
+      attachmentFile,
       onCommand: async (cmd, arg) => {
         const modes = { available: 'available', focus: 'focus', dnd: 'dnd', away: 'away', auto: 'auto' };
         if (modes[cmd]) {
@@ -203,6 +221,24 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
       const line = outcomeLine(a);
       if (line) telegram.resolved(a, line).catch(() => {});
     }
+  });
+
+  // Replying to an agent's chat question: your text goes back into that exact session.
+  const sendReply = async (a, text) => {
+    a.reply_result = { state: 'sending', at: Date.now() };
+    router.emit('update', a);
+    const r = await resumeSession(a.metadata.reply, text, { log });
+    a.reply_result = { state: r.ok ? 'sent' : 'failed', name: r.name, error: r.error ?? null, command: r.ok ? null : r.command, at: Date.now() };
+    router.ledger.append('reply.sent', { id: a.id, via: a.metadata.reply.via, ok: !!r.ok, error: r.error ?? null });
+    router.emit('update', a);
+    server.broadcast('reply', { id: a.id, ...a.reply_result });
+    if (telegram && a.answer?.surface === 'telegram') {
+      telegram.send(r.ok ? `✅ Sent to ${r.name}. Its answer will show up here.` : `⚠️ Couldn’t reach ${r.name}: ${r.error}`).catch(() => {});
+    }
+    return a.reply_result;
+  };
+  router.on('update', (a) => {
+    if (a.status === 'answered' && a.metadata?.reply && a.answer?.text && !a.reply_result) sendReply(a, a.answer.text);
   });
 
   const getConfig = () => {
@@ -294,6 +330,21 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
       return { ok: true, count: events.length, events: events.slice(0, 6).map((e) => ({ start: e.start, end: e.end, summary: e.summary })) };
     }],
     ['GET', /^\/v1\/telegram$/, () => telegram?.status() ?? { configured: false }],
+    // Reply to an agent's chat message (a "finished" update or its question).
+    ['POST', /^\/v1\/asks\/([\w-]+)\/reply$/, async (q, id) => {
+      const a = router.get(id);
+      if (!a?.metadata?.reply) throw httpError(404, 'this message can’t be replied to');
+      const text = String((await q.body()).text || '').trim();
+      if (!text) throw httpError(400, 'type a reply first');
+      if (a.status === 'pending' && a.kind === 'input') {
+        router.answer(id, { text, surface: 'web' }); // the update listener sends it
+        return { queued: true };
+      }
+      if (a.status === 'unread') router.ack(id, { surface: 'web' });
+      return sendReply(a, text);
+    }],
+    ['GET', /^\/v1\/asks\/([\w-]+)\/attachments\/(\d+)$/, (q, id, i) => previewAttachment(router.get(id)?.attachments?.[Number(i)])],
+    ['POST', /^\/v1\/asks\/([\w-]+)\/attachments\/(\d+)\/open$/, (q, id, i) => openAttachment(router.get(id)?.attachments?.[Number(i)])],
     ['POST', /^\/v1\/actions\/answer$/, async (q) => {
       const b = await q.body();
       if (!verifyAction(ntfySecret, b.ask, b.option, b.sig)) throw httpError(403, 'bad signature');

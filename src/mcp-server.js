@@ -12,6 +12,7 @@ function describe(view) {
   if (!view.final) return { ...view, note: `Still waiting for the human. Call check_answer with id "${view.id}" later; keep working on anything that doesn't depend on it.` };
   if (view.status === 'expired') return { ...view, note: 'Deadline passed with no answer and no default. Do not proceed with the action.' };
   if (view.status === 'dismissed' && !view.answer?.option) return { ...view, note: 'The human dismissed this. Treat it as "no" and do not ask again right away.' };
+  if (view.answer?.option && view.answer?.text) return { ...view, note: `The human chose "${view.answer.label}" and added a note in answer.text. Follow the note; it takes priority over your plan.` };
   return view;
 }
 
@@ -32,7 +33,7 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
       'Ask your human a question through Switchboard, their attention router. Use this instead of stopping to ask in chat when you need a decision, approval or a piece of information. ' +
       'Switchboard decides when to interrupt them (now, at a natural break, or in a digest) based on urgency and their focus state, so: write one short question answerable with one tap; ' +
       'give 2-4 options with their consequences; set a deadline and a safe default whenever one exists (then they are not interrupted unnecessarily); be honest about urgency. ' +
-      'Returns the answer, or a pending id to check later with check_answer.',
+      'They may add a note to any choice (answer.text): follow it. Returns the answer, or a pending id to check later with check_answer.',
     inputSchema: {
       question: z.string().describe('One question, answerable in a tap or a word. Max ~140 chars.'),
       options: z.array(z.union([z.string(), z.object({ label: z.string(), consequence: z.string().optional(), style: z.enum(['default', 'primary', 'danger']).optional() })])).optional()
@@ -63,6 +64,45 @@ export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSecond
     else input.input = { type: 'text' };
     try {
       const view = await c.ask(input, { timeoutMs: Math.min(args.wait_seconds ?? defaultWaitSeconds, maxWaitSeconds) * 1000 });
+      return text(describe(view));
+    } catch (err) {
+      return { ...text(`Switchboard error: ${err.message}`), isError: true };
+    }
+  });
+
+  server.registerTool('request_review', {
+    title: 'Ask the human to review something',
+    description:
+      'Hand your human a document, plan, diff or file to review before you continue, through Switchboard. They see a formatted preview (and can open the file in their editor), ' +
+      'then Approve or Request changes, usually with comments. Comments arrive in answer.text: read them and act on them. ' +
+      'Use this instead of pasting a long document into chat and waiting. Returns the decision, or a pending id to check later with check_answer.',
+    inputSchema: {
+      title: z.string().describe('What to review, as a short question, e.g. "Review the migration plan before I run it?"'),
+      summary: z.string().optional().describe('One paragraph: what it is and what you want feedback on.'),
+      file_path: z.string().optional().describe('Absolute path of a file to review (local agents only).'),
+      content: z.string().optional().describe('The document itself (markdown) or a unified diff, if there is no file.'),
+      format: z.enum(['markdown', 'diff', 'text', 'code']).optional().describe('How to show `content` (default markdown).'),
+      url: z.string().optional().describe('A link to review instead, e.g. a pull request or a Google Doc.'),
+      urgency: z.enum(['low', 'normal', 'high', 'critical']).optional(),
+      deadline: z.string().optional().describe('When the review stops being useful, e.g. "2h".'),
+      wait_seconds: z.number().int().min(0).max(3600).optional().describe('How long to block waiting (default 120). Returns a pending id if unanswered.'),
+    },
+  }, async (args) => {
+    const attachments = [];
+    if (args.file_path) attachments.push({ path: args.file_path });
+    if (args.content) attachments.push({ content: args.content, format: args.format || 'markdown', title: args.title });
+    if (args.url) attachments.push({ url: args.url });
+    if (!attachments.length) return { ...text('Give file_path, content or url so there is something to review.'), isError: true };
+    try {
+      const view = await c.ask({
+        agent: agent(),
+        kind: 'review',
+        question: args.title,
+        urgency: args.urgency,
+        deadline: args.deadline,
+        detail: { paragraph: args.summary },
+        attachments,
+      }, { timeoutMs: Math.min(args.wait_seconds ?? defaultWaitSeconds, maxWaitSeconds) * 1000 });
       return text(describe(view));
     } catch (err) {
       return { ...text(`Switchboard error: ${err.message}`), isError: true };

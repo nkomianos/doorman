@@ -6,7 +6,7 @@ import { describe, test } from 'node:test';
 import { expandEvents, parseIcs } from '../src/ics.js';
 import { Ledger } from '../src/ledger.js';
 import { elicitationToAsk, answerToElicitResult } from '../src/proxy.js';
-import { claudeInform, permissionAsk, permissionOutput } from '../src/hooks.js';
+import { claudeInform, codexInform, permissionAsk, permissionOutput } from '../src/hooks.js';
 import { normalizeAsk, SpecError } from '../src/spec.js';
 import { HumanState } from '../src/state.js';
 import { matchGlob, parseDuration } from '../src/util.js';
@@ -167,8 +167,20 @@ describe('Claude Code hook mapping', () => {
   test('Stop becomes a collapsible FYI; duplicate notifications are dropped', () => {
     const s = claudeInform({ hook_event_name: 'Stop', cwd: '/x/web', session_id: 's9', last_assistant_message: 'Done.' });
     assert.equal(s.kind, 'inform');
-    assert.equal(s.collapse_key, 'claude-stop:s9');
+    assert.equal(s.collapse_key, 'claude-code-turn:s9');
+    assert.deepEqual(s.metadata.reply, { via: 'claude-code', session: 's9', cwd: '/x/web' });
     assert.equal(claudeInform({ hook_event_name: 'Stop', stop_hook_active: true }), null);
     assert.equal(claudeInform({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }), null);
+  });
+
+  test('a turn that ends with a question becomes something you can reply to', () => {
+    const q = claudeInform({ hook_event_name: 'Stop', cwd: '/x/api', session_id: 's1', last_assistant_message: 'Two options:\n\n1. Patch it\n2. Rewrite it\n\nWhich approach do you prefer?' });
+    assert.equal(q.kind, 'input');
+    assert.equal(q.question, 'api: Which approach do you prefer?');
+    assert.equal(q.metadata.reply.session, 's1');
+    const c = codexInform({ type: 'agent-turn-complete', 'thread-id': 't-1', cwd: '/x/web', 'last-assistant-message': 'Draft is in docs/plan.md. Want me to open a PR?' });
+    assert.equal(c.kind, 'input');
+    assert.deepEqual(c.metadata.reply, { via: 'codex', session: 't-1', cwd: '/x/web' });
+    assert.equal(claudeInform({ hook_event_name: 'Stop', session_id: 's2', last_assistant_message: 'Done. Let me know if you want changes.' }).kind, 'inform');
   });
 });

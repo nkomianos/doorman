@@ -50,6 +50,9 @@ Switchboard sits on the **receiver's** side. It's yours, across all of them, the
 | **Knows when you're busy** | Connect your calendar, and optionally let it notice when you step away or join a Zoom call. That reading stays on your computer: agents only ever see “Focus” or “Available”. |
 | **See what your agents are doing** | The **Now** page shows each Claude Code and Codex session (working, waiting for you, or done) by reading the logs they already write. No setup. |
 | **Answer from anywhere** | Desktop notifications with answer buttons, plus your phone through Telegram or ntfy. One tap answers; nothing on your computer is exposed to the internet. |
+| **Reply to your agents** | When Claude Code or Codex finishes by asking you something, you see its whole message and answer right there (or from Telegram). Switchboard resumes that exact session with your reply. |
+| **Reviews** | Agents hand you a plan, doc, diff or file. You get a formatted preview, **Open in editor**, and **Approve** or **Request changes** with comments that go back to the agent. |
+| **Say more than yes or no** | Add a note to any answer (“Deny, use staging instead”). The agent gets it with your choice. |
 | **Undo everything** | Answer, dismiss or snooze and the card leaves at once, with 5 seconds to undo before anything reaches the agent. |
 | **Tamper-evident log** | Every request, routing decision and answer (including what you were shown) goes into a hash-chained log you can verify. |
 
@@ -80,6 +83,27 @@ Requires Node 20+. No database, no build step, no account. Run `npm link` once i
     <td><sub><b>Mobile:</b> the inbox works on any screen.</sub></td>
   </tr>
 </table>
+
+## More than yes or no
+
+Not everything an agent needs from you fits on two buttons.
+
+**Typed answers.** An agent can ask for text or a small form instead of options. Answer in the inbox, or reply to the message in Telegram (your phone keyboard's dictation works there too).
+
+**Replying to an agent's chat.** When Claude Code or Codex ends a turn by asking you something (“Want me to open a PR, or keep iterating?”), Switchboard turns it into a question with the agent's full message. Type your reply and Switchboard continues that exact session for you, using the agent's own command-line tool:
+
+| Agent | What Switchboard runs, in the session's folder |
+|---|---|
+| Codex | `codex exec resume <session> -` (your reply on stdin) |
+| Claude Code | `claude -p --resume <session>` (needs the `claude` CLI: `npm install -g @anthropic-ai/claude-code`) |
+
+The agent's next turn comes back to your inbox like any other. Ordinary “finished” updates have a **Reply** button too. If the CLI isn't installed, Switchboard tells you and gives you the exact command to copy. If that session is also open in a window, the reply runs alongside it.
+
+**Reviews.** Agents call the `request_review` MCP tool (or a script runs `switchboard review plan.md`). You get a formatted preview of the Markdown, diff or code, **Open in editor** (VS Code if you have it), and **Approve** or **Request changes** with comments. On Telegram the document arrives as a file under the message, and you reply with your comments before tapping a button. Reviews are never turned into automatic rules.
+
+**Notes on any answer.** Click **Add a note** on any decision (or reply to it in Telegram, then tap an option). The agent gets your note in `answer.text` with your choice. For Claude Code permission prompts, a note on **Deny** becomes the reason Claude sees.
+
+> Tip: put this in your agents' instructions (`AGENTS.md`, `CLAUDE.md`, or OpenClaw/Hermes memory): *“Use request_review for plans and documents I should see before you continue, and ask_human for decisions. Read any note in answer.text.”*
 
 ## How it decides
 
@@ -163,11 +187,12 @@ Tip: tell your agent in its instructions or memory to use `ask_human` before any
 <details>
 <summary><b>Codex, Cursor, Claude Desktop and any MCP client</b></summary>
 
-`switchboard mcp` is an MCP server with four tools:
+`switchboard mcp` is an MCP server with five tools:
 
 | Tool | |
 |---|---|
 | `ask_human` | A question, options with consequences, urgency, deadline, safe default, reversibility and context. Waits up to `wait_seconds`, then returns a pending id. |
+| `request_review` | A file, a document or diff (Markdown), or a link to review. Returns Approve / Request changes, with your comments in `answer.text`. |
 | `check_answer` | Pick up an answer later. |
 | `notify_human` | An update. Goes to the digest unless urgent, so agents can use it freely. |
 | `get_human_state` | `available` / `focus` / `dnd` / `away` and the minimum urgency that may interrupt. |
@@ -286,6 +311,7 @@ switchboard start [--port 7777] [--detach]    switchboard focus <available|focus
 switchboard stop | status | open              switchboard digest
 switchboard setup [agent] [--write|--remove]  switchboard rules [list | add … | rm <id>]
 switchboard ask "…" -o A -o B [...]           switchboard ledger [tail | verify | export]
+switchboard review <file|url>                 (exit 0 approved, 1 changes requested)
 switchboard notify "…" [--urgency low]        switchboard demo [--speed 2]
 switchboard mcp                               switchboard hook <claude-code|codex>
 switchboard proxy [--gate …] -- <cmd…>         switchboard tunnel

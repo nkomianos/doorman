@@ -101,6 +101,10 @@ export function createServer({ router, token, version, getConfig, updateConfig, 
     }],
     ['POST', /^\/v1\/asks$/, async (q) => {
       const b = await q.body();
+      if (q.who.role === 'agent' && Array.isArray(b.attachments) && b.attachments.some((x) => (typeof x === 'string' ? !/^https?:\/\//i.test(x) : x?.path))) {
+        // A key may belong to a cloud agent: it can't point Switchboard at files on this computer.
+        throw httpError(400, 'agent keys can attach links or content, not local file paths');
+      }
       if (q.who.role === 'agent') {
         // A key speaks for exactly one agent, so it can't borrow another agent's budget or rules.
         const k = q.who.key;

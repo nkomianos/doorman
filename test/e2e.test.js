@@ -143,7 +143,7 @@ describe('MCP', () => {
     const client = new Client({ name: 'test-agent', version: '1.0.0' });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [BIN, 'mcp'], env }));
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human', 'request_review']);
     const call = client.callTool({ name: 'ask_human', arguments: { question: 'Which region?', options: ['eu-west-1', 'us-east-1'], wait_seconds: 10 } });
     const a = await nextOpenAsk((x) => x.question === 'Which region?');
     assert.equal(a.agent.name, 'test-agent', 'agent identity comes from the MCP client');

@@ -17,7 +17,7 @@ Status: draft. Breaking changes bump the version string.
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `agent` | string or `{id, name, instance?}` | recommended | Who is asking. `id` is stable and keys the attention budget; `name` is what the human sees; `instance` identifies a session. |
-| `kind` | `decision` \| `input` \| `inform` | inferred | `decision` = choose an option. `input` = free text or a small form. `inform` = FYI, no answer needed. Inferred from `options` / `input` when omitted. |
+| `kind` | `decision` \| `input` \| `inform` | inferred | `decision` = choose an option. `input` = free text or a small form. `inform` = FYI, no answer needed. `review` = a decision about `attachments`, with default options **Approve** (`approve`) and **Request changes** (`changes`); reviews are never automated by rules. Inferred from `options` / `input` when omitted. |
 | `question` | string ≤ 300 | yes | The single question (or, for `inform`, the headline). Aim for ≤ 140. |
 | `options` | array of string or `{id?, label, consequence?, style?}` | decision: ≥ 2 | Up to 8. `style` is `default`, `primary` or `danger`. `id` defaults to a slug of the label. |
 | `input` | `{type: "text", placeholder?}` or `{schema}` | input | `schema` is a flat JSON Schema object (string, number, integer, boolean, enum properties), the same subset MCP elicitation uses. |
@@ -31,7 +31,8 @@ Status: draft. Breaking changes bump the version string.
 | `collapse_key` | string | no | Like a mobile push collapse key: a new `inform` with the same key from the same agent replaces the unread older one. |
 | `fingerprint` | string | no | Identifies "the same request" for rules and learning, e.g. `Bash:npm test`. Defaults to agent id + normalized question. |
 | `tags` | string[] | no | Free-form labels; rules can match on them. |
-| `metadata` | object | no | Opaque; stored and returned, never shown. |
+| `attachments` | array of string or `{title?, path?, url?, content?, format?}` | no | Up to 10 things to look at: a local file path, an http(s) link, or inline `content` (≤ 200,000 chars). `format` is `markdown`, `text`, `diff`, `code` or `file`, inferred from the path. Agent keys may only attach links or content. |
+| `metadata` | object | no | Opaque; stored and returned, never shown. `metadata.reply = {via: "codex" or "claude-code", session, cwd}` marks a message from an agent's chat that you can reply to: Switchboard resumes that session with your reply. |
 
 ### Example
 
@@ -77,6 +78,8 @@ The agent receives:
   "delivery": { "mode": "interrupted", "reason": "high urgency while you're available" }
 }
 ```
+
+`answer.text` carries a typed answer, or a note the human added to their choice (on a review: their comments). Agents should read it and follow it.
 
 `answer.by` is `human`, `default`, or `rule:<id>`. Agents should treat `dismissed` without an option, and `expired`, as **no**.
 
