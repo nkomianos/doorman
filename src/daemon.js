@@ -227,7 +227,15 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
   const sendReply = async (a, text) => {
     a.reply_result = { state: 'sending', at: Date.now() };
     router.emit('update', a);
-    const r = await resumeSession(a.metadata.reply, text, { log });
+    const r = await resumeSession(a.metadata.reply, text, {
+      log,
+      onLateFailure: (f) => {
+        a.reply_result = { state: 'failed', name: f.name, error: f.error, command: f.command, at: Date.now() };
+        router.ledger.append('reply.failed', { id: a.id, error: f.error });
+        router.emit('update', a);
+        server.broadcast('reply', { id: a.id, ...a.reply_result });
+      },
+    });
     a.reply_result = { state: r.ok ? 'sent' : 'failed', name: r.name, error: r.error ?? null, command: r.ok ? null : r.command, at: Date.now() };
     router.ledger.append('reply.sent', { id: a.id, via: a.metadata.reply.via, ok: !!r.ok, error: r.error ?? null });
     router.emit('update', a);

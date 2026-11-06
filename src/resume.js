@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 export const RESUMERS = {
-  codex: { name: 'Codex', cmd: 'codex', args: (session) => ['exec', 'resume', session, '-'], install: 'npm install -g @openai/codex' },
+  // The session already ran in that folder, so don't make Codex re-ask whether it trusts it.
+  codex: { name: 'Codex', cmd: 'codex', args: (session) => ['exec', 'resume', '--skip-git-repo-check', session, '-'], install: 'npm install -g @openai/codex' },
   'claude-code': { name: 'Claude Code', cmd: 'claude', args: (session) => ['-p', '--resume', session], install: 'npm install -g @anthropic-ai/claude-code' },
 };
 
@@ -25,7 +26,7 @@ export function manualCommand(reply, text) {
  * ({ok: true}) or clearly failed ({ok: false, error, command}). It doesn't wait for
  * the agent's whole turn.
  */
-export function resumeSession(reply, text, { spawnImpl = spawn, settleMs = 2500, log = () => {} } = {}) {
+export function resumeSession(reply, text, { spawnImpl = spawn, settleMs = 2500, log = () => {}, onLateFailure = () => {} } = {}) {
   return new Promise((resolve) => {
     const r = RESUMERS[reply?.via];
     if (!r) return resolve({ ok: false, error: 'this message can’t be replied to from Switchboard' });
@@ -49,7 +50,10 @@ export function resumeSession(reply, text, { spawnImpl = spawn, settleMs = 2500,
       if (code) {
         const why = stderr.trim().split('\n').slice(-3).join(' ').slice(0, 300);
         const missing = /not recognized|not found|No such file/i.test(why);
-        done({ ok: false, error: missing ? `${r.name} CLI not found. Install it with: ${r.install}` : `${r.name} stopped: ${why || `exit code ${code}`}` });
+        const failure = { ok: false, error: missing ? `${r.name} CLI not found. Install it with: ${r.install}` : `${r.name} stopped: ${why || `exit code ${code}`}` };
+        // Failing after we already said "sent" (network, login…) still gets reported.
+        if (settled) onLateFailure({ name: r.name, command, ...failure });
+        done(failure);
         log(`${r.name} reply failed (${code}): ${why}`);
       }
     });
