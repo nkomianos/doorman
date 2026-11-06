@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
@@ -32,7 +32,7 @@ export function findCommand(name) {
  */
 export function installInfo(bin = BIN) {
   const p = bin.toLowerCase();
-  const npx = p.includes(`${sep}_npx${sep}`.toLowerCase()) || p.includes('/_npx/');
+  const npx = /[\\/]_npx[\\/]/.test(p);
   const temp = p.startsWith(tmpdir().toLowerCase());
   return { bin, ephemeral: npx || temp, reason: npx ? 'npx' : temp ? 'temp' : null };
 }
@@ -138,7 +138,7 @@ export function doctorChecks({ daemon, daemonUrl, config, integrations = [], hom
   add('Node.js', major >= 20 ? 'ok' : 'fail', `v${process.versions.node}`, major >= 20 ? null : 'Switchboard needs Node 20 or newer: https://nodejs.org');
 
   const inst = installInfo();
-  add('Install', inst.ephemeral ? 'warn' : 'ok', inst.ephemeral ? 'running from a temporary npx folder' : inst.bin,
+  add('Install', inst.ephemeral ? 'warn' : 'ok', inst.ephemeral ? `running from a temporary ${inst.reason === 'npx' ? 'npx ' : ''}folder` : inst.bin,
     inst.ephemeral ? `Fine for a try-out. To connect agents for good: ${INSTALL_COMMAND}` : null);
 
   add('Daemon', daemon ? 'ok' : 'fail', daemon ? `running at ${daemonUrl} (v${daemon.version})` : `not running at ${daemonUrl}`, daemon ? null : 'switchboard start');
