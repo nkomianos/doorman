@@ -52,10 +52,19 @@ describe('one-click integrations', () => {
     setIntegration('codex', false, { home });
     assert.ok(!readFileSync(file, 'utf8').includes('switchboard'));
 
-    writeFileSync(file, 'notify = ["my-notifier"]\n');
+    // Like Codex's own computer-use plugin: an existing notify program gets chained, then restored.
+    const original = 'notify = [ "C:\\\\Tools\\\\codex-computer-use.exe", "turn-ended" ]';
+    writeFileSync(file, `model = "gpt"\n${original}\n\n[features]\nx = true\n`);
     const r = setIntegration('codex', true, { home });
-    assert.match(r.message, /already have a notify/);
-    assert.ok(readFileSync(file, 'utf8').includes('my-notifier'));
+    assert.match(r.message, /keeps working/);
+    const chained = /^notify = (.*)$/m.exec(readFileSync(file, 'utf8'))[1];
+    const list = JSON.parse(chained);
+    assert.deepEqual(list.slice(2, 5), ['hook', 'codex', '--']);
+    assert.deepEqual(list.slice(5), ['C:\\Tools\\codex-computer-use.exe', 'turn-ended']);
+    setIntegration('codex', true, { home }); // connecting twice doesn't chain twice
+    assert.equal(JSON.parse(/^notify = (.*)$/m.exec(readFileSync(file, 'utf8'))[1]).filter((x) => x === '--').length, 1);
+    setIntegration('codex', false, { home });
+    assert.deepEqual(JSON.parse(/^notify = (.*)$/m.exec(readFileSync(file, 'utf8'))[1]), ['C:\\Tools\\codex-computer-use.exe', 'turn-ended']);
   });
 
   test('OpenClaw and Muse Code: servers go where each one reads them', () => {

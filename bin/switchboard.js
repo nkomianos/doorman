@@ -216,7 +216,15 @@ async function cmdHook(args) {
   const { runClaudeHook, codexInform } = await import('../src/hooks.js');
   const c = new SwitchboardClient();
   if (which === 'codex') {
-    const raw = args._[1] || args.rest?.[0];
+    // Codex appends the event JSON as the last argument. Anything between `--` and it is
+    // the notify program you had before Switchboard: it gets the same event, first.
+    const raw = args.rest?.length ? args.rest.at(-1) : args._[1];
+    const chained = args.rest?.slice(0, -1) || [];
+    if (chained.length) {
+      try {
+        spawn(chained[0], [...chained.slice(1), raw], { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
+      } catch { /* the original notifier is best-effort, like ours */ }
+    }
     try {
       const inform = codexInform(JSON.parse(raw));
       if (inform) await c.submit(inform);

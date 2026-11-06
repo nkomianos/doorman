@@ -25,6 +25,21 @@ function claudeDesktopConfig(home) {
   return join(home, '.config', 'Claude', 'claude_desktop_config.json');
 }
 
+// Codex's `notify` is a single-line array of strings. JSON arrays of strings are valid TOML.
+const OUR_NOTIFY = ['node', BIN, 'hook', 'codex'];
+const notifyLine = (list) => `notify = ${JSON.stringify(list)}`;
+const isOurNotify = (list) => list.includes('hook') && list.includes('codex') && list.some((x) => /switchboard\.js$/.test(String(x)));
+function readNotify(text) {
+  const m = /^[ \t]*notify[ \t]*=[ \t]*(.*)$/m.exec(text);
+  if (!m) return null;
+  try {
+    const list = JSON.parse(m[1].trim());
+    return { line: m[0], list: Array.isArray(list) && list.every((x) => typeof x === 'string') ? list : null };
+  } catch {
+    return { line: m[0], list: null };
+  }
+}
+
 const getPath = (obj, path) => path.reduce((o, k) => o?.[k], obj);
 function setPath(obj, path, value) {
   let o = obj;
@@ -113,7 +128,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
   const codexConfig = join(home, '.codex', 'config.toml');
   const hook = (timeout) => [{ hooks: [{ type: 'command', command: `${SELF} hook claude-code`, timeout }] }];
   const claudeHooks = { PermissionRequest: hook(hookWaitSeconds + 60), Notification: hook(15), Stop: hook(15) };
-  const codexNotify = `notify = ["node", ${JSON.stringify(BIN)}, "hook", "codex"]`;
+  const codexNotify = notifyLine(OUR_NOTIFY);
   const codexMcp = `[mcp_servers.switchboard]\ncommand = "node"\nargs = [${JSON.stringify(BIN)}, "mcp"]`;
 
   return [
@@ -161,11 +176,18 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
         let text = existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : '';
         backup(codexConfig);
         const notes = [];
-        // TOML: top-level keys must come before the first [table].
-        if (!/^\s*notify\s*=/m.test(text)) {
+        const current = readNotify(text);
+        if (!current) {
+          // TOML: top-level keys must come before the first [table].
           const firstTable = text.search(/^\s*\[/m);
           text = firstTable === -1 ? `${codexNotify}\n${text}` : `${text.slice(0, firstTable)}${codexNotify}\n\n${text.slice(firstTable)}`;
-        } else if (!text.includes('"hook", "codex"')) notes.push('You already have a notify command, so turn-complete updates were not added.');
+        } else if (!current.list) {
+          notes.push('Couldn’t read your existing notify setting, so turn-complete updates were not added.');
+        } else if (!isOurNotify(current.list)) {
+          // Codex allows one notify program. Keep yours: Switchboard passes every event on to it.
+          text = text.replace(current.line, notifyLine([...OUR_NOTIFY, '--', ...current.list]));
+          notes.push('Your existing notify program keeps working: Switchboard passes each event on to it.');
+        }
         if (!text.includes('[mcp_servers.switchboard]')) text = `${text.trimEnd()}\n\n${codexMcp}\n`;
         writeFile(codexConfig, text);
         return ['Connected Codex in ~/.codex/config.toml.', ...notes].join(' ');
@@ -174,7 +196,12 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
         if (!existsSync(codexConfig)) return 'Not connected';
         backup(codexConfig);
         let text = readFileSync(codexConfig, 'utf8');
-        text = text.split('\n').filter((l) => !(l.trim().startsWith('notify') && l.includes('"hook", "codex"'))).join('\n');
+        const current = readNotify(text);
+        if (current?.list && isOurNotify(current.list)) {
+          const i = current.list.indexOf('--');
+          // Put back whatever notify program you had before, or remove ours.
+          text = i >= 0 ? text.replace(current.line, notifyLine(current.list.slice(i + 1))) : text.replace(`${current.line}\n`, '').replace(current.line, '');
+        }
         text = text.replace(/\n*\[mcp_servers\.switchboard\]\ncommand = "node"\nargs = \[[^\]]*\]\n?/, '\n');
         writeFile(codexConfig, text);
         return 'Removed Switchboard from ~/.codex/config.toml.';
