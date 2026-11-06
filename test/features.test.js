@@ -362,7 +362,7 @@ describe('reviews, notes and replies', () => {
     };
     const ok = await resumeSession({ via: 'codex', session: 'abc-123', cwd: null }, 'Yes, open the PR', { spawnImpl: fake('ok'), settleMs: 30 });
     assert.equal(ok.ok, true);
-    assert.deepEqual(fake.last.args, ['codex', 'exec', 'resume', '--skip-git-repo-check', 'abc-123', '-']);
+    assert.deepEqual(fake.last.args.join(' ').split(' '), ['codex','exec', 'resume', '--skip-git-repo-check', 'abc-123', '-']);
     assert.equal(fake.last.stdin.written, 'Yes, open the PR');
     const bad = await resumeSession({ via: 'codex', session: 'abc-123' }, 'hi', { spawnImpl: fake('missing'), settleMs: 200 });
     assert.equal(bad.ok, false);

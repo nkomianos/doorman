@@ -40,7 +40,12 @@ export function resumeSession(reply, text, { spawnImpl = spawn, settleMs = 2500,
     try {
       // On Windows the CLIs are .cmd shims, so they need a shell. Arguments are fixed and
       // the session id is validated above; your message only travels over stdin.
-      child = spawnImpl(r.cmd, r.args(reply.session), { cwd, shell: process.platform === 'win32', windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+      // (Passing one command string rather than an args array keeps Node from warning.)
+      const win = process.platform === 'win32';
+      const args = r.args(reply.session);
+      child = win
+        ? spawnImpl([r.cmd, ...args].join(' '), [], { cwd, shell: true, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] })
+        : spawnImpl(r.cmd, args, { cwd, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
     } catch (err) {
       return done({ ok: false, error: err.message });
     }

@@ -1,7 +1,7 @@
 {
   "name": "@nkomianos/switchboard",
   "version": "0.1.0",
-  "description": "The receiver-side attention layer for AI agents. One local router that decides when your agents get to interrupt you.",
+  "description": "The attention router for your AI agents. One local inbox that decides when Claude Code, Codex, Cursor and any MCP agent get to interrupt you.",
   "type": "module",
   "bin": {
     "switchboard": "bin/switchboard.js"
@@ -14,27 +14,45 @@
     "bin",
     "src",
     "ui",
-    "spec"
+    "spec",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "start": "node bin/switchboard.js start",
     "demo": "node bin/switchboard.js demo",
-    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
+    "test": "node scripts/test.js",
+    "prepublishOnly": "npm test"
   },
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nkomianos/switchboard.git"
+  },
+  "homepage": "https://github.com/nkomianos/switchboard#readme",
+  "bugs": {
+    "url": "https://github.com/nkomianos/switchboard/issues"
   },
   "keywords": [
     "ai",
     "agents",
     "mcp",
     "human-in-the-loop",
+    "ask-human",
     "attention",
     "notifications",
     "approvals",
-    "claude-code"
+    "claude-code",
+    "codex",
+    "cursor",
+    "openclaw",
+    "telegram"
   ],
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"
