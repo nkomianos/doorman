@@ -21,7 +21,9 @@ export const DEFAULT_CONFIG = {
   sessions: true,
   // Cloud agents (Grok, the Muse app…) reach /mcp through a tunnel with an agent key. Off by default.
   remote: { enabled: false, url: null },
-  hookWaitSeconds: 600,
+  // How long a Claude Code permission prompt waits for an answer in Switchboard before
+  // Claude shows its own prompt. Short, so the agent never looks frozen.
+  hookWaitSeconds: 60,
 };
 
 // Settings the inbox UI / PATCH /v1/config may change.

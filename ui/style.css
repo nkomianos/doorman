@@ -529,3 +529,19 @@ pre.diff .meta { color: var(--muted); font-weight: 600; }
   .att-head { grid-template-columns: auto minmax(0, 1fr); }
   .att-head .form-actions { grid-column: 1 / -1; }
 }
+
+/* ---------------------------------------------------------- first run & this computer */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-head h2 { margin: 0; }
+.install-hint { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
+.note-cli { margin: 4px 0 8px; }
+.row-setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.row-setting:first-of-type { border-top: 0; }
+.doctor { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; }
+.doctor li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); align-items: start; }
+.d-mark { font-weight: 700; text-align: center; line-height: 1.5; }
+.d-ok .d-mark { color: var(--ok); }
+.d-warn .d-mark { color: var(--warn); }
+.d-fail .d-mark { color: var(--danger); }
+.d-info .d-mark { color: var(--muted); }
+@media (max-width: 640px) { .row-setting { flex-direction: column; align-items: flex-start; } }

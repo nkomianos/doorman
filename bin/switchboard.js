@@ -10,10 +10,17 @@ import { fmtDuration } from '../src/util.js';
 
 const BIN = fileURLToPath(import.meta.url);
 
-const HELP = `switchboard ${VERSION}: the attention layer for your AI agents
+const HELP = `switchboard ${VERSION}: the attention router for your AI agents
+
+Get going
+  switchboard                                  Start in the background and open the inbox
+  switchboard connect [agent...]               Connect every agent found on this computer (or just these)
+  switchboard disconnect [agent...]            Undo it, restoring each agent's own settings
+  switchboard doctor                           Check that everything works, with fixes
+  switchboard autostart <on|off>               Start Switchboard when you sign in
 
 Daemon
-  switchboard start [--port 7777] [--detach]   Run the router (inbox at http://127.0.0.1:7777)
+  switchboard start [--port 7777] [--detach] [--open]   Run the router in this terminal (or the background)
   switchboard stop                             Stop a running daemon
   switchboard status                           Your state, what's waiting, agent budgets
   switchboard open                             Open the inbox in your browser
@@ -29,7 +36,7 @@ Agents
                                            Blocks, prints the answer (scriptable)
   switchboard review <file|url> [--title "…"]  Ask for a review; exit 0 approved, 1 changes requested
   switchboard notify "Message" [--urgency low]
-  switchboard mcp                              MCP server: ask_human, notify_human, get_human_state
+  switchboard mcp                              MCP server: ask_human, request_review, notify_human, …
   switchboard proxy [--name x] [--gate "delete_*"] -- <mcp server command...>
                                            Route a server's elicitations + gate its tools
   switchboard hook claude-code                 Claude Code hook (PermissionRequest, Notification, Stop)
@@ -73,7 +80,7 @@ async function cmdStart(args) {
   const client = new SwitchboardClient({ autostart: false, url: port ? `http://127.0.0.1:${port}` : undefined });
   if (await client.health()) {
     if (!args.flags['background-child']) console.log(`switchboard is already running at ${client.url}`);
-    return;
+    return client;
   }
   const p = ensureHome();
   if (args.flags.detach) {
@@ -82,8 +89,12 @@ async function cmdStart(args) {
     child.unref();
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 150));
-      const c = new SwitchboardClient({ autostart: false });
-      if (await c.health()) { console.log(`switchboard running in the background at ${c.url}  (logs: ${p.log})`); return; }
+      const c = new SwitchboardClient({ autostart: false, url: port ? `http://127.0.0.1:${port}` : undefined });
+      if (await c.health()) {
+        if (!args.flags.quiet) console.log(`switchboard running in the background at ${c.url}  (logs: ${p.log})`);
+        if (args.flags.open) openBrowser(`${c.url}/`);
+        return c;
+      }
     }
     die(`daemon did not start; see ${p.log}`);
   }
@@ -104,6 +115,93 @@ async function cmdStart(args) {
     console.log(`\n  switchboard ${VERSION} is on the line.\n\n  Inbox   ${d.url}/\n  Home    ${d.home}\n  State   ${d.router.state.current().label}\n\n  Try:    switchboard demo        (in another terminal)\n          switchboard setup claude-code\n`);
     if (args.flags.open) openBrowser(`${d.url}/`);
   }
+}
+
+const agentHomeOpts = () => (process.env.SWITCHBOARD_AGENT_HOME ? { home: process.env.SWITCHBOARD_AGENT_HOME } : {});
+
+/** `switchboard` on its own: be running, open the inbox, say what's next. */
+async function cmdQuickstart() {
+  const { installInfo, INSTALL_COMMAND } = await import('../src/system.js');
+  let c = new SwitchboardClient({ autostart: false });
+  const already = !!(await c.health());
+  if (!already) c = await cmdStart({ _: [], flags: { detach: true, quiet: true } });
+  const url = `${c.url}/`;
+  openBrowser(url);
+  const temp = installInfo().ephemeral;
+  console.log(`
+  Switchboard is ${already ? 'running' : 'on the line'}: ${url}
+  Your inbox is opening in the browser. Finish setup there (about two minutes).
+
+  Next:  switchboard connect     connect the agents on this computer
+         switchboard doctor      check that everything works
+         switchboard help        all commands
+${temp ? `
+  You're running a temporary copy (npx). To keep it and connect agents:
+         ${INSTALL_COMMAND}
+` : ''}`);
+}
+
+async function cmdConnect(args, on) {
+  const { listIntegrations, setIntegration } = await import('../src/integrations.js');
+  const opts = agentHomeOpts();
+  const all = listIntegrations(opts);
+  const ids = args._.length ? args._ : all.filter((i) => (on ? i.detected && !i.connected : i.connected)).map((i) => i.id);
+  if (!ids.length) {
+    if (!on) return console.log('Nothing is connected.');
+    const connected = all.filter((i) => i.connected).map((i) => i.name);
+    return console.log(connected.length
+      ? `Already connected: ${connected.join(', ')}. Nothing else supported was found on this computer.`
+      : `No supported agents found on this computer. Supported: ${all.map((i) => i.name).join(', ')}.
+Any other agent can use the HTTP API or MCP: open the inbox → Connect.`);
+  }
+  for (const id of ids) {
+    const i = all.find((x) => x.id === id);
+    if (!i) die(`unknown agent "${id}". Pick from: ${all.map((x) => x.id).join(', ')}`);
+    try {
+      const r = setIntegration(id, on, opts);
+      console.log(`  ${on ? '✓' : '○'} ${i.name.padEnd(15)} ${r.message}`);
+    } catch (err) {
+      console.log(`  ✗ ${i.name.padEnd(15)} ${err.message}`);
+      process.exitCode = 1;
+    }
+  }
+  if (on && !process.exitCode) console.log(`
+  Each file Switchboard changed has a backup next to it (.switchboard-bak).
+  Restart those agents (or open a new session) to pick it up. Undo any time: switchboard disconnect`);
+}
+
+async function cmdDoctor(args) {
+  const { doctorChecks } = await import('../src/system.js');
+  const { listIntegrations } = await import('../src/integrations.js');
+  const c = new SwitchboardClient({ autostart: false });
+  const daemon = await c.health();
+  let config = null;
+  if (daemon) { try { config = await c.request('GET', '/v1/config'); } catch { /* old daemon or bad token */ } }
+  const checks = doctorChecks({ daemon, daemonUrl: c.url, config, integrations: listIntegrations(agentHomeOpts()) });
+  if (args.flags.json) return console.log(JSON.stringify(checks, null, 2));
+  const mark = { ok: '✓', warn: '!', fail: '✗', info: '·' };
+  console.log(`switchboard ${VERSION} doctor
+`);
+  for (const ch of checks) {
+    console.log(`  ${mark[ch.status]} ${ch.name.padEnd(22)} ${ch.detail}`);
+    if (ch.fix) console.log(`    ${' '.repeat(22)} → ${ch.fix}`);
+  }
+  const fails = checks.filter((x) => x.status === 'fail').length;
+  console.log(fails ? `
+  ${fails === 1 ? 'One thing needs' : `${fails} things need`} fixing (✗ above).` : `
+  All good.`);
+  process.exitCode = fails ? 1 : 0;
+}
+
+async function cmdAutostart(args) {
+  const { autostartStatus, setAutostart } = await import('../src/system.js');
+  const sub = args._[0] || 'status';
+  if (sub === 'status') {
+    const s = autostartStatus();
+    return console.log(s.enabled ? `on (${s.file})` : 'off. Turn on with: switchboard autostart on');
+  }
+  if (sub !== 'on' && sub !== 'off') die('usage: switchboard autostart <on|off|status>');
+  try { console.log(setAutostart(sub === 'on').message); } catch (err) { die(err.message); }
 }
 
 async function cmdStatus() {
@@ -245,7 +343,7 @@ async function cmdHook(args) {
     let raw = '';
     for await (const chunk of process.stdin) raw += chunk;
     const payload = JSON.parse(raw);
-    const wait = Number(process.env.SWITCHBOARD_HOOK_WAIT) || loadConfig().hookWaitSeconds || 600;
+    const wait = Math.min(Number(process.env.SWITCHBOARD_HOOK_WAIT) || loadConfig().hookWaitSeconds || 60, 3600);
     const out = await runClaudeHook(payload, { client: c, waitSeconds: wait, onCreated: (id) => { pending = id; } });
     pending = null;
     if (out) process.stdout.write(JSON.stringify(out));
@@ -262,7 +360,7 @@ async function cmdHook(args) {
 
 async function cmdSetup(args) {
   const { listIntegrations, setIntegration } = await import('../src/integrations.js');
-  const opts = { hookWaitSeconds: loadConfig().hookWaitSeconds || 600 };
+  const opts = {};
   const all = listIntegrations(opts);
   const which = args._[0];
   if (!which) {
@@ -399,6 +497,10 @@ async function main() {
       return;
     }
     case 'hook': return cmdHook(args);
+    case 'connect': return cmdConnect(args, true);
+    case 'disconnect': return cmdConnect(args, false);
+    case 'doctor': return cmdDoctor(args);
+    case 'autostart': return cmdAutostart(args);
     case 'setup': return cmdSetup(args);
     case 'url': return cmdUrl(args);
     case 'tunnel': return cmdTunnel();
@@ -409,7 +511,7 @@ async function main() {
     case '-v':
     case '--version':
     case 'version': return console.log(VERSION);
-    case undefined:
+    case undefined: return cmdQuickstart();
     case 'help':
     case '-h':
     case '--help': return console.log(HELP);

@@ -26,6 +26,7 @@ import { fmtDuration, parseDuration, randomToken } from './util.js';
 import { actionUrl, registerProtocol } from './winproto.js';
 import { attachmentFile, openAttachment, previewAttachment } from './attachments.js';
 import { resumeSession } from './resume.js';
+import { INSTALL_COMMAND, agentClis, autostartStatus, desktopNotifier, doctorChecks, installInfo, setAutostart } from './system.js';
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
@@ -254,7 +255,7 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
     for (const k of EDITABLE_KEYS) out[k] = config[k] ?? null;
     if (out.ntfy) out.ntfy = { ...out.ntfy, token: out.ntfy.token ? '••••' : null, replyTopic: out.ntfy.replyTopic || `${out.ntfy.topic}-reply` };
     if (out.telegram) out.telegram = { mirror: out.telegram.mirror || 'always', redact: !!out.telegram.redact, token: out.telegram.token ? '••••' : null, username: out.telegram.username || null, paired: !!out.telegram.chatId };
-    return { config: out, home: p.home, port: config.port, version: VERSION, cli: CLI, telegram: telegram?.status() ?? null, activity_supported: sensor.supported };
+    return { config: out, home: p.home, port: config.port, version: VERSION, cli: CLI, telegram: telegram?.status() ?? null, activity_supported: sensor.supported, install: { ...installInfo(), command: INSTALL_COMMAND }, autostart: autostartStatus(), clis: agentClis(), desktop_supported: desktopNotifier().ok };
   };
   const updateConfig = async (patch) => {
     if (patch.ntfy?.token === '••••') patch.ntfy.token = config.ntfy?.token ?? null;
@@ -318,6 +319,15 @@ export async function startDaemon({ home, port, overrides = {}, log = (m) => con
       const on = (await q.body()).connected !== false;
       const r = setIntegration(id, on, integrationOpts());
       router.ledger.append('integration.changed', { id, connected: on });
+      return r;
+    }],
+    ['GET', /^\/v1\/doctor$/, () => ({
+      checks: doctorChecks({ daemon: { version: VERSION }, daemonUrl: baseUrl(), config: getConfig(), integrations: listIntegrations(integrationOpts()) }),
+    })],
+    ['POST', /^\/v1\/autostart$/, async (q) => {
+      const on = (await q.body()).enabled !== false;
+      const r = setAutostart(on);
+      router.ledger.append('autostart.changed', { enabled: on });
       return r;
     }],
     ['GET', /^\/v1\/now$/, () => ({

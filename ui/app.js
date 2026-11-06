@@ -89,6 +89,7 @@ const PATHS = {
   wake: '<path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>',
   mute: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  power: '<path d="M12 3v8"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
   pulse: '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>',
@@ -923,7 +924,7 @@ function testBoxHtml() {
 
 function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
   return `${pageHead('Settings', 'Changes apply right away once you save.')}
-  <div class="settings-nav">${['notifications', 'phone', 'schedule', 'privacy', 'delivery', 'connect'].map((k) => `<a class="chip-btn" href="#settings/${k}" data-anchor-link="${k}">${{ notifications: 'Notifications', phone: 'Phone', schedule: 'Schedule', privacy: 'Privacy', delivery: 'Delivery', connect: 'Connect agents' }[k]}</a>`).join('')}</div>
+  <div class="settings-nav">${['notifications', 'phone', 'schedule', 'privacy', 'delivery', 'computer'].map((k) => `<a class="chip-btn" href="#settings/${k}" data-anchor-link="${k}">${{ notifications: 'Notifications', phone: 'Phone', schedule: 'Schedule', privacy: 'Privacy', delivery: 'Delivery', computer: 'This computer' }[k]}</a>`).join('')}</div>
   <form id="settings" class="form" autocomplete="off">
     <section class="panel" id="s-notifications">
       <h2>Notifications on this computer</h2>
@@ -978,6 +979,7 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
         <label class="field"><span>Bundle requests that arrive within <small>seconds</small></span><input name="bundle" type="number" min="0" max="120" value="${Math.round((c.bundleWindowMs ?? 4000) / 1000)}"></label>
         <label class="field"><span>Digest times <small>comma separated</small></span><input name="digest" value="${esc((c.digest?.times || []).join(', '))}" placeholder="12:00, 17:30"></label>
         <label class="field"><span>Suggest a rule after <small>same answers in a row</small></span><input name="learn" type="number" min="2" max="20" value="${c.learnThreshold ?? 3}"></label>
+        <label class="field"><span>Claude Code permission prompts wait <small>seconds, then Claude asks in its own window</small></span><input name="hookwait" type="number" min="10" max="3600" value="${c.hookWaitSeconds ?? 60}"></label>
       </div>
       <label class="toggle" style="margin-top:12px"><input type="checkbox" name="onbreak" ${c.digest?.onBreak !== false ? 'checked' : ''}><span class="sw"></span><span>When Focus or Do not disturb ends, deliver everything that waited, in one notification</span></label>
     </section>
@@ -985,15 +987,14 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
     ${S.settingsDirty ? `<div class="savebar" role="region" aria-label="Unsaved changes"><span class="grow">You have unsaved changes</span><button class="btn ghost sm" type="button" data-act="settings-discard">Discard</button><button class="btn primary sm" type="submit">Save changes</button></div>` : ''}
   </form>
 
-  <section class="panel" id="s-connect">
-    <h2>Connect your agents</h2>
-    <p class="help">Run one of these in a terminal. Each prints or writes the exact setup for this computer.</p>
-    <div class="form" style="margin:0">
-      <div class="field">Claude Code: permission prompts and “done” messages${cmdBox(`${cli} setup claude-code --write`)}</div>
-      <div class="field">Codex: turn-complete messages and the ask_human tool${cmdBox(`${cli} setup codex`)}</div>
-      <div class="field">Cursor or any MCP client: ask_human, notify_human, get_human_state${cmdBox(`${cli} setup cursor`)}</div>
-      <div class="field">Gate risky tools on any MCP server${cmdBox(`${cli} proxy --name github --gate "delete_*|merge_*" -- npx -y @modelcontextprotocol/server-github`)}</div>
-    </div>
+  <section class="panel" id="s-computer">
+    <h2>This computer</h2>
+    ${S.config.install?.ephemeral ? `<div class="callout warn">${I('alert', 16)}<div>This is a temporary copy (npx). Install it to start at login and keep agents connected:${cmdBox(S.config.install.command)}</div></div>`
+      : `<div class="row-setting"><div><b>Start with my computer</b><p class="help" style="margin:2px 0 0">Runs in the background when you sign in. No window.</p></div>
+      <button class="btn sm" data-act="autostart" data-on="${S.config.autostart?.enabled ? '0' : '1'}">${S.config.autostart?.enabled ? 'Turn off' : `${I('power', 14)} Turn on`}</button></div>`}
+    <div class="row-setting"><div><b>Check my setup</b><p class="help" style="margin:2px 0 0">Node, notifications, agents, reply tools and more, with a fix for anything that’s off. Same as <code>switchboard doctor</code>.</p></div>
+      <button class="btn sm" data-act="doctor">${I('check', 14)} Run checks</button></div>
+    ${S.doctor ? `<ul class="doctor">${S.doctor.map((d) => `<li class="d-${d.status}"><span class="d-mark" aria-label="${d.status}">${{ ok: '✓', warn: '!', fail: '✗', info: '·' }[d.status]}</span><div><b>${esc(d.name)}</b> <span class="help" style="margin:0">${esc(d.detail)}</span>${d.fix && d.name !== 'Start at login' ? (/^(switchboard|npm|sudo) /.test(d.fix) ? cmdBox(d.fix) : `<div class="help" style="margin:2px 0 0">${esc(d.fix)}</div>`) : ''}</div></li>`).join('')}</ul>` : ''}
   </section>
   <p class="help">Switchboard ${esc(VERSION)} · data in <span class="mono">${esc(S.config.home)}</span> · port ${S.config.port}</p>`;
 }
@@ -1004,12 +1005,25 @@ function viewSettingsBody(c, q, cal, n, cs, notif, cli, testBox) {
 function setupSteps() {
   const c = S.config?.config || {};
   const realAgents = S.agents.filter((g) => !g.id.startsWith('demo-'));
+  const temp = !!S.config?.install?.ephemeral;
+  const found = S.integrations.filter((i) => i.detected && !i.connected);
+  const agentAction = temp
+    ? installHint()
+    : found.length
+      ? `<button class="btn primary sm" data-act="connect-all">${I('link', 14)} Connect ${found.length === 1 ? esc(found[0].name) : `all ${found.length} found`}</button><button class="btn ghost sm" data-act="go" data-view="connect" data-anchor="agents">Choose</button>`
+      : `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>`;
   return [
     { key: 'demo', title: 'See it with sample agents', text: 'Three made-up agents send 12 requests at once. See how few of them actually ping you.', done: (S.stats?.asks || 0) > 0, action: `<button class="btn primary sm" data-act="demo">${I('play', 14)} Run the demo</button>` },
-    { key: 'agents', title: 'Connect your agents', text: 'One click for Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes or Muse Code. Grok and other cloud agents connect through a tunnel.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="agents">${I('link', 14)} Connect agents</button>` },
+    { key: 'agents', title: 'Connect your agents', text: found.length && !temp ? `Found on this computer: <b>${found.map((i) => esc(i.name)).join(', ')}</b>. Switchboard backs up each config before it changes it.` : 'One click for Claude Code, Codex, Cursor, Claude Desktop, OpenClaw, Hermes or Muse Code. Grok and other cloud agents connect through a tunnel.', done: S.integrations.some((i) => i.connected) || S.keys.length > 0 || realAgents.length > 0, action: agentAction },
     { key: 'phone', title: 'Get pings on your phone', text: 'Answer from your lock screen with one tap, through Telegram or ntfy.', done: !!(S.config?.telegram?.paired || c.ntfy?.topic), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="phone">${I('phone', 14)} Set up phone</button>` },
     { key: 'context', title: 'Tell Switchboard when you’re busy', text: 'Connect a calendar, or let it notice when you step away or join a call.', done: !!(c.calendar?.ics || c.activity?.enabled), action: `<button class="btn sm" data-act="go" data-view="connect" data-anchor="calendar">${I('calendar', 14)} Calendar &amp; activity</button>` },
+    { key: 'autostart', title: 'Start with your computer', text: 'Switchboard runs quietly in the background, so your agents can always reach you. No window, no dock icon.', done: !!S.config?.autostart?.enabled, action: temp ? installHint() : `<button class="btn sm" data-act="autostart" data-on="1">${I('power', 14)} Turn on</button>` },
   ];
+}
+
+/** Running from npx: say how to install for good, wherever it matters. */
+function installHint() {
+  return `<div class="install-hint"><span class="help" style="margin:0">This is a temporary copy (npx). Install it to keep it:</span>${cmdBox(S.config?.install?.command || 'npm install -g github:nkomianos/switchboard')}</div>`;
 }
 
 function setupChecklist({ compact = false } = {}) {
@@ -1092,13 +1106,20 @@ function viewConnect() {
   html += setupChecklist({ compact: true });
 
   // Agents on this computer
-  html += `<section class="panel" id="s-agents"><h2>Agents on this computer</h2><p class="help">Switchboard edits each agent’s config for you and keeps a backup next to it (<code>.switchboard-bak</code>). You can disconnect any time.</p>
+  const found = S.integrations.filter((i) => i.detected && !i.connected);
+  const temp = !!S.config?.install?.ephemeral;
+  const clis = S.config?.clis || {};
+  html += `<section class="panel" id="s-agents"><div class="panel-head"><h2>Agents on this computer</h2>${found.length > 1 && !temp ? `<button class="btn primary sm" data-act="connect-all">${I('link', 14)} Connect all ${found.length} found</button>` : ''}</div>
+    <p class="help">Switchboard edits each agent’s config for you and keeps a backup next to it (<code>.switchboard-bak</code>). You can disconnect any time. Restart an agent (or open a new session) after connecting it.</p>
+    ${temp ? `<div class="callout warn">${I('alert', 16)}<div><b>You’re running a temporary copy.</b> npx keeps it in a cache that npm clears, which would break your agents’ connection later. Install it once, then connect:${cmdBox(S.config.install.command)}</div></div>` : ''}
     <div class="integrations">${S.integrations.map((i) => `<div class="integration${i.connected ? ' on' : ''}">
       <div class="int-head"><b>${esc(i.name)}</b><span class="status-pill ${i.connected ? 'done' : i.detected ? 'idle' : 'off'}">${i.connected ? 'Connected' : i.detected ? 'Installed' : 'Not found'}</span></div>
       <p>${esc(i.description)}</p>
+      ${i.id === 'claude-code' && i.connected && clis.claude && !clis.claude.found ? `<p class="help note-cli">To answer Claude’s questions from here (not just see them), install the Claude Code CLI and sign in once:${cmdBox(clis.claude.install)}</p>` : ''}
+      ${i.id === 'codex' && i.connected && clis.codex && !clis.codex.found ? `<p class="help note-cli">To reply to Codex from here, Switchboard needs the codex CLI on your PATH:${cmdBox(clis.codex.install)}</p>` : ''}
       <div class="form-actions">${i.connected
         ? `<button class="btn sm" data-act="integration" data-id="${i.id}" data-on="0">Disconnect</button>`
-        : `<button class="btn ${i.detected ? 'primary ' : ''}sm" data-act="integration" data-id="${i.id}" data-on="1">${I('link', 14)} Connect</button>`}
+        : `<button class="btn ${i.detected ? 'primary ' : ''}sm" data-act="integration" data-id="${i.id}" data-on="1" ${temp ? 'disabled title="Install Switchboard first"' : ''}>${I('link', 14)} Connect</button>`}
         <details class="snippet"><summary>Do it by hand</summary><p class="help">Add to <code>${esc(i.file)}</code>:</p><pre class="full">${esc(i.snippet)}</pre>${i.extra ? `<p class="help">${esc(i.extraLabel || 'Also:')}</p>${cmdBox(i.extra)}` : ''}</details>
       </div>
     </div>`).join('') || '<p class="help">Loading…</p>'}</div>
@@ -1497,6 +1518,35 @@ document.addEventListener('click', async (e) => {
       return toast('Topic generated', { sub: 'Save, then subscribe to it in the ntfy app' });
     }
     case 'settings-discard': S.settingsDirty = false; await loadConfig().catch(fail); return render();
+    case 'connect-all': {
+      const found = S.integrations.filter((i) => i.detected && !i.connected);
+      b.disabled = true;
+      const done = [];
+      const failed = [];
+      for (const i of found) {
+        try { await api('POST', `/v1/integrations/${i.id}`, { connected: true }); done.push(i.name); } catch (err) { failed.push(`${i.name}: ${err.message}`); }
+      }
+      await loadIntegrations(); render();
+      if (done.length) toast(`Connected ${done.join(', ')}`, { sub: 'Restart them (or open a new session) to pick it up. Backups are next to each config.', ms: 8000 });
+      if (failed.length) fail(new Error(failed.join('; ')));
+      return undefined;
+    }
+    case 'autostart': {
+      const on = b.dataset.on === '1';
+      b.disabled = true;
+      try {
+        const r = await api('POST', '/v1/autostart', { enabled: on });
+        await loadConfig(); render();
+        toast(on ? 'Switchboard will start with your computer' : 'Start at login is off', { sub: r.message });
+      } catch (err) { b.disabled = false; fail(err); }
+      return undefined;
+    }
+    case 'doctor': {
+      b.disabled = true;
+      try { S.doctor = (await api('GET', '/v1/doctor')).checks; render(); } catch (err) { fail(err); }
+      b.disabled = false;
+      return undefined;
+    }
     case 'integration': {
       const on = b.dataset.on === '1';
       const name = S.integrations.find((x) => x.id === id)?.name || id;
@@ -1651,6 +1701,7 @@ document.addEventListener('submit', async (e) => {
       bundleWindowMs: Math.max(0, Number(f.get('bundle')) || 0) * 1000,
       digest: { times, onBreak: !!f.get('onbreak') },
       learnThreshold: Number(f.get('learn')) || 3,
+      hookWaitSeconds: Math.min(3600, Math.max(10, Number(f.get('hookwait')) || 60)),
       desktop: !!f.get('desktop'),
       sessions: !!f.get('sessions'),
       ntfy: f.get('n_topic') ? { server: f.get('n_server') || 'https://ntfy.sh', topic: f.get('n_topic').trim(), token: f.get('n_token') || null, mirror: f.get('n_mirror'), redact: !!f.get('n_redact') } : null,

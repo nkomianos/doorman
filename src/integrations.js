@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INSTALL_COMMAND, installInfo } from './system.js';
 
 export const BIN = fileURLToPath(new URL('../bin/switchboard.js', import.meta.url));
 const SELF = `node "${BIN}"`;
@@ -19,8 +20,9 @@ const readJSONFile = (file) => {
 const backup = (file) => { if (existsSync(file)) copyFileSync(file, `${file}.switchboard-bak`); };
 const writeFile = (file, text) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); };
 
-function claudeDesktopConfig(home) {
-  if (process.platform === 'win32') return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
+// Given an explicit home (tests, SWITCHBOARD_AGENT_HOME), stay inside it: never fall back to the real %APPDATA%.
+function claudeDesktopConfig(home, explicit) {
+  if (process.platform === 'win32') return join((!explicit && process.env.APPDATA) || join(home, 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
   if (process.platform === 'darwin') return join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
   return join(home, '.config', 'Claude', 'claude_desktop_config.json');
 }
@@ -136,11 +138,17 @@ function hermesIntegration(home) {
   };
 }
 
-export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
+// Claude Code kills a hook after its timeout. How long the hook actually waits for you is
+// read from Switchboard's settings each time, so this is only a ceiling: changing the
+// wait in Settings never needs the hook config rewritten.
+export const HOOK_CEILING_SECONDS = 3660;
+
+export function integrations({ home: homeArg } = {}) {
+  const home = homeArg || homedir();
   const claudeSettings = join(home, '.claude', 'settings.json');
   const codexConfig = join(home, '.codex', 'config.toml');
   const hook = (timeout) => [{ hooks: [{ type: 'command', command: `${SELF} hook claude-code`, timeout }] }];
-  const claudeHooks = { PermissionRequest: hook(hookWaitSeconds + 60), Notification: hook(15), Stop: hook(15) };
+  const claudeHooks = { PermissionRequest: hook(HOOK_CEILING_SECONDS), Notification: hook(15), Stop: hook(15) };
   const codexNotify = notifyLine(OUR_NOTIFY);
   // Switchboard's tools only ever ask you, so they're pre-approved: without this, Codex
   // cancels them in non-interactive runs (codex exec) and prompts for each call in the app.
@@ -224,7 +232,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
       },
     },
     mcpJsonIntegration({ id: 'cursor', name: 'Cursor', description: 'Gives Cursor’s agent ask_human, notify_human and get_human_state tools.', file: join(home, '.cursor', 'mcp.json'), dir: join(home, '.cursor') }),
-    mcpJsonIntegration({ id: 'claude-desktop', name: 'Claude Desktop', description: 'Lets Claude ask you a question or send you an update through Switchboard while it works.', file: claudeDesktopConfig(home), dir: dirname(claudeDesktopConfig(home)) }),
+    mcpJsonIntegration({ id: 'claude-desktop', name: 'Claude Desktop', description: 'Lets Claude ask you a question or send you an update through Switchboard while it works.', file: claudeDesktopConfig(home, !!homeArg), dir: dirname(claudeDesktopConfig(home, !!homeArg)) }),
     mcpJsonIntegration({
       id: 'openclaw',
       name: 'OpenClaw',
@@ -268,6 +276,9 @@ export function listIntegrations(opts) {
 export function setIntegration(id, on, opts) {
   const i = integrations(opts).find((x) => x.id === id);
   if (!i) throw Object.assign(new Error(`no integration ${id}`), { status: 404 });
+  if (on && installInfo(opts?.bin).ephemeral && !opts?.allowEphemeral) {
+    throw Object.assign(new Error(`This copy of Switchboard runs from a temporary npx folder that npm clears, which would break ${i.name}'s connection later. Install it first: ${INSTALL_COMMAND}`), { status: 409 });
+  }
   const message = on ? i.connect() : i.disconnect();
   return { message, integration: listIntegrations(opts).find((x) => x.id === id) };
 }

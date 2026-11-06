@@ -8,8 +8,10 @@
 One inbox for every agent that needs you, and one router that decides when any of them gets to interrupt you.
 
 <p>
+  <a href="https://github.com/nkomianos/switchboard/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nkomianos/switchboard/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-4f46e5"></a>
   <img alt="Node 20+" src="https://img.shields.io/badge/node-%E2%89%A520-4f46e5">
+  <img alt="Windows, macOS, Linux" src="https://img.shields.io/badge/os-Windows%20%7C%20macOS%20%7C%20Linux-4f46e5">
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-15803d">
   <img alt="2 dependencies" src="https://img.shields.io/badge/dependencies-2-6b6b74">
   <a href="#contributing"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-15803d"></a>
@@ -20,6 +22,7 @@ One inbox for every agent that needs you, and one router that decides when any o
   <a href="#how-it-decides">How it decides</a> ·
   <a href="#connect-your-agents">Connect agents</a> ·
   <a href="#on-your-phone">Phone</a> ·
+  <a href="#how-it-compares">Compare</a> ·
   <a href="spec/ask-v0.1.md">Ask spec</a> ·
   <a href="#faq">FAQ</a>
 </p>
@@ -59,19 +62,21 @@ Switchboard sits on the **receiver's** side. It's yours, across all of them, the
 ## Quick start
 
 ```bash
-git clone https://github.com/nkomianos/switchboard && cd switchboard
-npm install
-node bin/switchboard.js start      # opens on http://127.0.0.1:7777
+npm install -g github:nkomianos/switchboard
+switchboard
 ```
 
-Open **http://127.0.0.1:7777**. A first-run checklist walks you through four steps:
+That's it. Switchboard starts in the background and opens your inbox at **http://127.0.0.1:7777**, where a short checklist takes about two minutes:
 
-1. **Run the demo** to see three sample agents compete for your attention.
-2. **Connect your agents**: one click each for local agents (Switchboard backs up every config it edits), a tunnel for cloud agents like Grok.
+1. **Run the demo** to watch three sample agents compete for your attention.
+2. **Connect your agents.** Switchboard finds the ones on your computer and connects them all with one click, backing up every config it edits. Cloud agents like Grok connect through a tunnel.
 3. **Set up your phone** with Telegram or ntfy.
 4. **Tell Switchboard when you're busy** with a calendar link or activity sensing.
+5. **Start with your computer**, so agents can always reach you.
 
-Requires Node 20+. No database, no build step, no account. Run `npm link` once if you want a global `switchboard` command.
+Prefer the terminal? `switchboard connect` connects every agent it finds, and `switchboard doctor` checks the whole setup and tells you how to fix anything that's off.
+
+Requires Node 20+. No database, no build step, no account. To try it without installing, run `npx github:nkomianos/switchboard` (it can't connect agents or start at login from npx's temporary folder, and tells you so).
 
 <table>
   <tr>
@@ -83,6 +88,21 @@ Requires Node 20+. No database, no build step, no account. Run `npm link` once i
     <td><sub><b>Mobile:</b> the inbox works on any screen.</sub></td>
   </tr>
 </table>
+
+## How it compares
+
+|  | Switchboard | Each agent's own notifications | Human-in-the-loop SDKs (e.g. HumanLayer) | Push services (ntfy, Pushover) |
+|---|---|---|---|---|
+| Works for | **you**, across all your agents | one agent | one developer's agent | whoever sends |
+| Decides **when** to interrupt you | ✓ status, budgets, deadlines, bundling | – | – | – |
+| One inbox for every agent | ✓ | – | via Slack or email | – |
+| Structured asks (options, defaults, deadlines) | ✓ | partly | ✓ | – |
+| Replies and reviews go back to the agent | ✓ | in its own window | ✓ | – |
+| Learns your answers | ✓ | per tool, per session | – | – |
+| Runs on your computer, no account | ✓ | ✓ | – (hosted) | self-host option |
+| Needs changes to the agent | no: hooks, MCP or a proxy | – | yes (SDK) | yes |
+
+Based on public docs as of November 2026; corrections welcome. Switchboard isn't a replacement for any of these. It's the layer they all go through, so the decision about interrupting you is made in one place, by something that works for you.
 
 ## More than yes or no
 
@@ -133,11 +153,13 @@ flowchart LR
 
 ## Connect your agents
 
-The **Connect** page detects what's installed and wires it up with one click. Prefer the terminal? Use these:
+The **Connect** page detects what's installed and wires it up with one click. Prefer the terminal?
 
 ```bash
-switchboard setup                       # what's installed and connected
-switchboard setup claude-code --write   # or any id below  (--remove to undo)
+switchboard connect                     # every supported agent on this computer
+switchboard connect codex cursor        # or just these (ids below)
+switchboard disconnect                  # undo; each agent's own settings come back
+switchboard setup claude-code           # print the config to add by hand instead
 ```
 
 | Agent | Runs | How it connects | Setup |
@@ -158,7 +180,7 @@ switchboard setup claude-code --write   # or any id below  (--remove to undo)
 <details>
 <summary><b>Claude Code</b>: permission prompts become one-tap decisions</summary>
 
-- **PermissionRequest**: Allow/Deny goes to your inbox and phone, and your answer goes back to Claude Code. If nobody answers in time, Claude Code shows its normal prompt.
+- **PermissionRequest**: Allow/Deny goes to your inbox and phone, and your answer goes back to Claude Code. If you don't answer within 60 seconds (change it in Settings), Claude Code shows its normal prompt, so it never looks frozen.
 - **Stop**: “Finished in api: …” updates, one per session.
 - **Notification**: other “needs you” moments.
 - Optional: `claude mcp add switchboard -- node /path/to/bin/switchboard.js mcp` gives Claude an `ask_human` tool for questions mid-task.
@@ -275,7 +297,10 @@ On **Windows**, desktop notifications have answer buttons too. Switchboard regis
 - **Cloud access is off by default.** When you turn it on, requests from outside this computer must use an agent key and can only reach the agent routes and `/mcp`.
 - **Signed one-tap answers.** Phone and desktop buttons carry an HMAC per request and option; forged answers are rejected.
 - **Hash-chained log.** `switchboard ledger verify` detects edits and deletions.
+- **What it changes.** Connecting an agent edits only that agent's config file, after saving a `.switchboard-bak` copy next to it. Disconnecting removes only Switchboard's entries. Start at login is one file in your Startup folder, LaunchAgents or `~/.config/autostart`.
 - **You are the customer.** There is no way for an agent to buy priority.
+
+Found a security problem? Please report it privately: see [SECURITY.md](SECURITY.md).
 
 ## The Ask format
 
@@ -307,6 +332,11 @@ The part meant to outlive this implementation: **one question**, options and the
 ## CLI
 
 ```
+switchboard                                   start in the background and open the inbox
+switchboard connect | disconnect [agent…]     wire up (or unwire) the agents on this computer
+switchboard doctor                            check everything, with a fix for each problem
+switchboard autostart <on|off>                start when you sign in
+
 switchboard start [--port 7777] [--detach]    switchboard focus <available|focus|dnd|away|auto> [--for 90m]
 switchboard stop | status | open              switchboard digest
 switchboard setup [agent] [--write|--remove]  switchboard rules [list | add … | rm <id>]
@@ -324,7 +354,7 @@ State lives in `~/.switchboard` (set `SWITCHBOARD_HOME` to change it): `config.j
 <details>
 <summary><b>Is this a desktop app?</b></summary>
 
-It's a small background program with a web inbox at `http://127.0.0.1:7777`, plus native desktop notifications. It runs the same on Windows, macOS and Linux.
+It's a small background program with a web inbox at `http://127.0.0.1:7777`, plus native desktop notifications. Turn on **Start with your computer** and it's simply always there. It runs on Windows, macOS and Linux; CI runs every test on all three.
 </details>
 
 <details>
@@ -345,6 +375,25 @@ Yes, through a tunnel you control: `switchboard tunnel` opens one, and only agen
 Hooks fail open: Claude Code falls back to its normal prompt. The SDK and `switchboard ask` start the daemon automatically if needed.
 </details>
 
+<details>
+<summary><b>Will it slow my agents down?</b></summary>
+
+Only Claude Code permission prompts wait for you, and only for 60 seconds by default (Settings → Delivery). Everything else is fire-and-forget: “finished” updates and Codex's notifications take a few milliseconds and never block the agent.
+</details>
+
+<details>
+<summary><b>How do I uninstall it?</b></summary>
+
+```bash
+switchboard disconnect          # restores each agent's settings
+switchboard autostart off
+switchboard stop
+npm uninstall -g @nkomianos/switchboard
+```
+
+Then delete `~/.switchboard` if you don't want to keep your rules and history.
+</details>
+
 ## Roadmap
 
 - Native menu-bar / tray app and a mobile app (the Ask format already carries a one-line form)
@@ -360,7 +409,7 @@ npm test      # router (fake clock), calendar, ledger, spec, learning, integrati
               # plus end to end: HTTP API, agent keys, Claude Code hook, MCP server, MCP proxy, ntfy
 ```
 
-Plain ESM JavaScript, no build step, two dependencies (`@modelcontextprotocol/sdk`, `zod`). `src/router.js` is the core; everything else is intake (hooks, MCP, proxy, HTTP) or surfaces (inbox, desktop, phone). Issues and pull requests are welcome.
+Plain ESM JavaScript, no build step, two dependencies (`@modelcontextprotocol/sdk`, `zod`). `src/router.js` is the core; everything else is intake (hooks, MCP, proxy, HTTP) or surfaces (inbox, desktop, phone). Issues and pull requests are welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in the [changelog](CHANGELOG.md).
 
 ## License
 
