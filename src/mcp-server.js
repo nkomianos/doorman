@@ -1,10 +1,14 @@
 // `switchboard mcp`: an MCP server any agent can add to reach you through Switchboard.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { basename } from 'node:path';
 import { z } from 'zod';
 import { SwitchboardClient } from './client.js';
 import { VERSION } from './config.js';
 import { slug } from './util.js';
+
+// What MCP clients call themselves, and what you'd call them.
+const CLIENT_NAMES = { 'codex-mcp-client': 'Codex', 'claude-code': 'Claude Code', 'claude-ai': 'Claude Desktop', 'cursor-vscode': 'Cursor', openclaw: 'OpenClaw', hermes: 'Hermes Agent', 'hermes-agent': 'Hermes Agent' };
 
 const text = (obj) => ({ content: [{ type: 'text', text: typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2) }] });
 
@@ -20,11 +24,13 @@ function describe(view) {
 export function buildMcpServer({ client, defaultWaitSeconds = 120, maxWaitSeconds = 3600 } = {}) {
   const server = new McpServer({ name: 'switchboard', version: VERSION });
   const c = client || new SwitchboardClient();
+  // Same identity as the agent's hooks ("Codex · api" / codex-api), so its budget and rules are shared.
   const agent = () => {
     if (c.agent) return c.agent;
-    const info = server.server.getClientVersion();
-    const name = info?.name || 'mcp-agent';
-    return { id: slug(name), name };
+    const raw = server.server.getClientVersion()?.name || 'mcp-agent';
+    const name = CLIENT_NAMES[raw] || raw;
+    const project = basename(process.cwd());
+    return { id: slug(`${name}-${project}`), name: `${name} · ${project}` };
   };
 
   server.registerTool('ask_human', {

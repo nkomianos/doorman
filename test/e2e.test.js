@@ -146,7 +146,7 @@ describe('MCP', () => {
     assert.deepEqual(tools.map((t) => t.name).sort(), ['ask_human', 'check_answer', 'get_human_state', 'notify_human', 'request_review']);
     const call = client.callTool({ name: 'ask_human', arguments: { question: 'Which region?', options: ['eu-west-1', 'us-east-1'], wait_seconds: 10 } });
     const a = await nextOpenAsk((x) => x.question === 'Which region?');
-    assert.equal(a.agent.name, 'test-agent', 'agent identity comes from the MCP client');
+    assert.match(a.agent.name, /^test-agent · /, 'agent identity comes from the MCP client and its folder');
     await c.request('POST', `/v1/asks/${a.id}/answer`, { option: 'us-east-1' });
     const res = JSON.parse((await call).content[0].text);
     assert.equal(res.answer.label, 'us-east-1');
