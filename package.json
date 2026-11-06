@@ -20,7 +20,7 @@
   "scripts": {
     "start": "node bin/switchboard.js start",
     "demo": "node bin/switchboard.js demo",
-    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
+    "test": "node scripts/test.js",
     "prepublishOnly": "npm test"
   },
   "engines": {
