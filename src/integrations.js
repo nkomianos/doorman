@@ -40,6 +40,19 @@ function readNotify(text) {
   }
 }
 
+/** Remove one [table] (and its [table.sub] tables) from TOML text, leaving everything else as it was. */
+function removeTomlTable(text, name) {
+  const lines = text.split('\n');
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(line);
+    if (header) skipping = header[1] === name || header[1].startsWith(`${name}.`);
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
 const getPath = (obj, path) => path.reduce((o, k) => o?.[k], obj);
 function setPath(obj, path, value) {
   let o = obj;
@@ -129,7 +142,9 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
   const hook = (timeout) => [{ hooks: [{ type: 'command', command: `${SELF} hook claude-code`, timeout }] }];
   const claudeHooks = { PermissionRequest: hook(hookWaitSeconds + 60), Notification: hook(15), Stop: hook(15) };
   const codexNotify = notifyLine(OUR_NOTIFY);
-  const codexMcp = `[mcp_servers.switchboard]\ncommand = "node"\nargs = [${JSON.stringify(BIN)}, "mcp"]`;
+  // Switchboard's tools only ever ask you, so they're pre-approved: without this, Codex
+  // cancels them in non-interactive runs (codex exec) and prompts for each call in the app.
+  const codexMcp = `[mcp_servers.switchboard]\ncommand = "node"\nargs = [${JSON.stringify(BIN)}, "mcp"]\ndefault_tools_approval_mode = "approve"`;
 
   return [
     {
@@ -188,7 +203,8 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
           text = text.replace(current.line, notifyLine([...OUR_NOTIFY, '--', ...current.list]));
           notes.push('Your existing notify program keeps working: Switchboard passes each event on to it.');
         }
-        if (!text.includes('[mcp_servers.switchboard]')) text = `${text.trimEnd()}\n\n${codexMcp}\n`;
+        // Rewrite our block every time, so reconnecting picks up new settings.
+        text = `${removeTomlTable(text, 'mcp_servers.switchboard').trimEnd()}\n\n${codexMcp}\n`;
         writeFile(codexConfig, text);
         return ['Connected Codex in ~/.codex/config.toml.', ...notes].join(' ');
       },
@@ -202,7 +218,7 @@ export function integrations({ home = homedir(), hookWaitSeconds = 600 } = {}) {
           // Put back whatever notify program you had before, or remove ours.
           text = i >= 0 ? text.replace(current.line, notifyLine(current.list.slice(i + 1))) : text.replace(`${current.line}\n`, '').replace(current.line, '');
         }
-        text = text.replace(/\n*\[mcp_servers\.switchboard\]\ncommand = "node"\nargs = \[[^\]]*\]\n?/, '\n');
+        text = removeTomlTable(text, 'mcp_servers.switchboard');
         writeFile(codexConfig, text);
         return 'Removed Switchboard from ~/.codex/config.toml.';
       },
